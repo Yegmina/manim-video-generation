@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Manim2Video Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        textarea { width: 100%; height: 160px; }
+        label { display: block; margin-top: 10px; }
+        input, select { width: 100%; padding: 6px; margin-top: 4px; }
+        button { margin-top: 12px; padding: 10px 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        video { max-width: 320px; height: auto; }
+    </style>
+</head>
+<body>
+    <h1>Manim2Video Dashboard</h1>
+
+    <section id="create-section">
+        <h2>Create New Video</h2>
+        <label>Title <input id="title" type="text" placeholder="My Animation" /></label>
+        <label>Scene Name <input id="scene" type="text" placeholder="MyScene" /></label>
+        <label>Quality
+            <select id="quality">
+                <option value="low_quality">Low</option>
+                <option value="medium_quality">Medium</option>
+                <option value="high_quality">High</option>
+            </select>
+        </label>
+        <label>Script Content</label>
+        <textarea id="script">from manim import *
+
+class MyScene(Scene):
+    def construct(self):
+        circle = Circle()
+        self.play(Create(circle))
+        self.wait()</textarea>
+        <button onclick="createVideo()">Submit</button>
+        <div id="create-msg"></div>
+    </section>
+
+    <section id="list-section">
+        <h2>Existing Videos</h2>
+        <button onclick="loadVideos()">Refresh List</button>
+        <table id="video-table">
+            <thead>
+                <tr><th>ID</th><th>Title</th><th>Status</th><th>Progress</th><th>Preview</th><th>Download</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </section>
+
+<script>
+const API_BASE = '/api/v1/manim2video';
+
+async function createVideo() {
+  const data = {
+    title: document.getElementById('title').value,
+    scene_name: document.getElementById('scene').value,
+    quality: document.getElementById('quality').value,
+    script_content: document.getElementById('script').value,
+    format: 'mp4'
+  };
+  const msg = document.getElementById('create-msg');
+  msg.textContent = 'Submitting...';
+  const res = await fetch(API_BASE + '/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if (res.ok) {
+    const json = await res.json();
+    msg.textContent = `Created video with ID ${json.id}`;
+    loadVideos();
+  } else {
+    const err = await res.text();
+    msg.textContent = 'Error: ' + err;
+  }
+}
+
+async function loadVideos() {
+  const tbody = document.querySelector('#video-table tbody');
+  tbody.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
+  const res = await fetch(API_BASE + '/');
+  if (!res.ok) { tbody.innerHTML = '<tr><td colspan="6">Error loading list</td></tr>'; return; }
+  const json = await res.json();
+  tbody.innerHTML = '';
+  json.items.forEach(v => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${v.id}</td>
+      <td>${v.title}</td>
+      <td>${v.status}</td>
+      <td>${(v.progress*100).toFixed(0)}%</td>
+      <td>${v.status==='completed'? `<video src="${API_BASE}/${v.id}/download" controls></video>` : ''}</td>
+      <td>${v.status==='completed'? `<a href="${API_BASE}/${v.id}/download">Download</a>` : ''}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+window.onload = loadVideos;
+</script>
+</body>
+</html>

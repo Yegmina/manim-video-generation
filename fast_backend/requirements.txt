@@ -1,0 +1,42 @@
+# FastAPI and Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Data Validation and Settings
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+
+# Authentication and Security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+email-validator>=2.1.0
+
+# Database
+sqlalchemy>=2.0.23
+alembic>=1.13.0
+psycopg2-binary>=2.9.9
+
+# File Handling
+aiofiles>=23.2.1
+
+# Background Tasks and Caching
+redis>=5.0.1
+celery>=5.3.4
+
+# Testing
+pytest>=7.4.3
+pytest-asyncio>=0.21.1
+httpx>=0.25.2
+
+# Video Generation
+manim>=0.19.0
+numpy>=1.21.0
+scipy>=1.7.0
+matplotlib>=3.5.0
+pillow>=8.3.0
+ffmpeg-python>=0.2.0
+
+# LLM Integration
+google-genai>=0.3.0

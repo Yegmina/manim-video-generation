@@ -1,0 +1,7 @@
+# This file is used internally by FFMPEG.
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/text_animation/720p30/partial_movie_files/TypingAnimation/2016333726_439424261_223132457.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/text_animation/720p30/partial_movie_files/TypingAnimation/543634251_1839128356_1802106506.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/text_animation/720p30/partial_movie_files/TypingAnimation/543634251_4071937804_1306952217.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/text_animation/720p30/partial_movie_files/TypingAnimation/543634251_2408024828_3074272305.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/text_animation/720p30/partial_movie_files/TypingAnimation/543634251_4271250823_2864161300.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/text_animation/720p30/partial_movie_files/TypingAnimation/543634251_1839128356_3278671325.mp4'

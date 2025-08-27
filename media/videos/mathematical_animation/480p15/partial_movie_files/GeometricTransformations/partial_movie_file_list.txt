@@ -1,0 +1,9 @@
+# This file is used internally by FFMPEG.
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/mathematical_animation/480p15/partial_movie_files/GeometricTransformations/1185818338_480405775_223132457.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/mathematical_animation/480p15/partial_movie_files/GeometricTransformations/624642324_1839128356_1394338817.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/mathematical_animation/480p15/partial_movie_files/GeometricTransformations/624642324_1870302406_1324833993.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/mathematical_animation/480p15/partial_movie_files/GeometricTransformations/624642324_1524555881_2766226339.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/mathematical_animation/480p15/partial_movie_files/GeometricTransformations/624642324_96748398_990879005.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/mathematical_animation/480p15/partial_movie_files/GeometricTransformations/624642324_2408024828_3111947112.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/mathematical_animation/480p15/partial_movie_files/GeometricTransformations/624642324_299082404_67660096.mp4'
+file 'file:C:/business/StudyShorts/researchNtest/video_generation/media/videos/mathematical_animation/480p15/partial_movie_files/GeometricTransformations/624642324_1839128356_3278671325.mp4'
