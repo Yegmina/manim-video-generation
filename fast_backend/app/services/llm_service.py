@@ -1,8 +1,10 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 import os
+import re
 
 from ..core.config import settings
+from .validation_report import ValidationReportBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -322,21 +324,21 @@ class LLMService:
 
     async def _validate_code_compilation(self, code: str) -> dict:
         """Validate that the generated code can be compiled and has proper structure."""
+        report = ValidationReportBuilder()
+
         try:
             # Try to compile the code
             compile(code, '<string>', 'exec')
             
             # Check for required elements
             if "class GeneratedScene" not in code:
-                return {"success": False, "error": "Missing GeneratedScene class"}
+                report.add_error("missing_generated_scene", "Missing GeneratedScene class")
             if "def construct(self)" not in code:
-                return {"success": False, "error": "Missing construct method"}
+                report.add_error("missing_construct_method", "Missing construct method")
             if "from manim import" not in code:
-                return {"success": False, "error": "Missing manim import"}
+                report.add_error("missing_manim_import", "Missing manim import")
             
             # Check for common issues that would cause runtime errors
-            issues = []
-            
             # Check for deprecated methods
             deprecated_methods = [
                 "axes.add_labels()", "axes.add_coordinate_labels()", 
@@ -345,7 +347,11 @@ class LLMService:
             
             for method in deprecated_methods:
                 if method in code:
-                    issues.append(f"Uses deprecated method: {method}")
+                    report.add_error(
+                        "deprecated_method",
+                        f"Uses deprecated method: {method}",
+                        evidence=method,
+                    )
             
             # Check for common syntax issues
             if "self.play(" in code and "run_time" not in code:
@@ -354,20 +360,85 @@ class LLMService:
             
             # Check for proper scene structure
             if "Scene" not in code and "ThreeDScene" not in code:
-                issues.append("Scene class not properly defined")
-            
-            if issues:
-                return {"success": False, "error": "; ".join(issues)}
+                report.add_error("invalid_scene_structure", "Scene class not properly defined")
+
             # Ensure there is at least one animation or addition command
             if "self.play(" not in code and "self.add(" not in code:
-                return {"success": False, "error": "No animation or object addition commands found"}
-            
-            return {"success": True, "error": None}
+                report.add_error(
+                    "missing_animation_actions",
+                    "No animation or object addition commands found",
+                )
+
+            # Static (non-runtime) layout-risk checks.
+            for risk in self._analyze_static_layout_risks(code):
+                report.add_layout_risk(risk["code"], risk["message"], risk.get("evidence"))
+
+            return report.to_result()
             
         except SyntaxError as e:
-            return {"success": False, "error": f"Syntax error: {e}"}
+            report.add_error("syntax_error", f"Syntax error: {e}")
+            return report.to_result()
         except Exception as e:
-            return {"success": False, "error": f"Compilation error: {e}"}
+            report.add_error("compilation_error", f"Compilation error: {e}")
+            return report.to_result()
+
+    def _analyze_static_layout_risks(self, code: str) -> List[Dict[str, str]]:
+        """Heuristic static checks for likely layout overlap/crowding/off-screen issues."""
+        risks: List[Dict[str, str]] = []
+
+        anchor_pattern = re.compile(r"\.(to_edge|to_corner)\(\s*(UP|DOWN|LEFT|RIGHT|UL|UR|DL|DR)\s*\)")
+        anchor_counts: Dict[str, int] = {}
+        for match in anchor_pattern.finditer(code):
+            anchor = match.group(2)
+            anchor_counts[anchor] = anchor_counts.get(anchor, 0) + 1
+        for anchor, count in anchor_counts.items():
+            if count >= 2:
+                risks.append(
+                    {
+                        "code": "anchor_overlap_risk",
+                        "message": f"Multiple objects target the same anchor ({anchor}); overlap is likely.",
+                        "evidence": f"{anchor} used {count} times",
+                    }
+                )
+
+        coord_pattern = re.compile(
+            r"\.(move_to|shift)\(\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)"
+        )
+        for match in coord_pattern.finditer(code):
+            x_val = float(match.group(2))
+            y_val = float(match.group(3))
+            if abs(x_val) > 7.1 or abs(y_val) > 4.0:
+                risks.append(
+                    {
+                        "code": "offscreen_coordinate_risk",
+                        "message": "Coordinate appears outside the default frame; object may be off-screen.",
+                        "evidence": match.group(0),
+                    }
+                )
+
+        font_size_pattern = re.compile(r"font_size\s*=\s*(\d+(?:\.\d+)?)")
+        large_fonts = [float(match.group(1)) for match in font_size_pattern.finditer(code) if float(match.group(1)) >= 72]
+        if large_fonts:
+            risks.append(
+                {
+                    "code": "large_text_crowding_risk",
+                    "message": "Large text font sizes can cause crowding or clipping in a single scene.",
+                    "evidence": f"font_size values: {', '.join(str(int(v)) for v in large_fonts)}",
+                }
+            )
+
+        text_obj_count = len(re.findall(r"\b(Text|MathTex|Tex|Paragraph|MarkupText)\s*\(", code))
+        fadeout_count = len(re.findall(r"\bFadeOut\s*\(", code))
+        if text_obj_count >= 6 and fadeout_count < max(1, text_obj_count // 3):
+            risks.append(
+                {
+                    "code": "text_density_crowding_risk",
+                    "message": "High text object count with limited cleanup suggests crowding risk.",
+                    "evidence": f"text_objects={text_obj_count}, fadeouts={fadeout_count}",
+                }
+            )
+
+        return risks
 
     async def _try_single_generation(self, model: str, prompt: str) -> Optional[str]:
         """Try a single generation attempt."""

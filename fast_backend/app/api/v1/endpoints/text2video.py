@@ -60,6 +60,10 @@ async def generate_video_from_text(
         if not code or "class" not in code:
             last_error = "LLM did not return valid Manim code"
             continue
+        validation_result = await llm_service._validate_code_compilation(code)
+        if not validation_result.get("success", False):
+            last_error = validation_result.get("error")
+            continue
 
         # Attempt dry run via VideoGenerationService (will render in background)
         file_service = FileService()
@@ -75,7 +79,10 @@ async def generate_video_from_text(
                 format=format,
                 output_name="ai_generated_video",
                 tags=["ai", "auto"],
-                metadata={"model": model or "gemini-2.5-flash"},
+                video_metadata={
+                    "model": model or "gemini-2.5-flash",
+                    "validation_report": validation_result.get("report"),
+                },
                 ip_address=request.client.host if request.client else None,
                 user_agent=request.headers.get("user-agent"),
             )
@@ -170,10 +177,12 @@ async def generate_video_auto_mode(
                 format=format,
                 output_name="auto_generated_video",
                 tags=["ai", "auto", "advanced"],
-                metadata={
+                video_metadata={
                     "model": "auto", 
                     "attempt": overall_attempt + 1,
-                    "auto_config": auto_config.dict()
+                    "auto_config": auto_config.dict(),
+                    "validation_report": converted_validation.get("report"),
+                    "source_validation_report": compilation_result.get("report"),
                 },
                 ip_address=request.client.host if request.client else None,
                 user_agent=request.headers.get("user-agent"),

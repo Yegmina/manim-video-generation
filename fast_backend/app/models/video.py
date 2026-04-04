@@ -219,7 +219,11 @@ class VideoGenerationCreate(PydanticBase):
     format: VideoFormat = Field(VideoFormat.MP4, description="Video format")
     output_name: Optional[str] = Field(None, max_length=255, description="Custom output filename")
     tags: Optional[List[str]] = Field(None, description="List of tags")
-    video_metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+    video_metadata: Optional[Dict[str, Any]] = Field(
+        None,
+        alias="metadata",
+        description="Additional metadata",
+    )
 
 
 class VideoGenerationUpdate(PydanticBase):
@@ -228,7 +232,7 @@ class VideoGenerationUpdate(PydanticBase):
     title: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
     tags: Optional[List[str]] = None
-    video_metadata: Optional[Dict[str, Any]] = None
+    video_metadata: Optional[Dict[str, Any]] = Field(None, alias="metadata")
 
 
 class VideoGenerationResponse(PydanticBase):

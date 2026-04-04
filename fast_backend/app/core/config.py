@@ -186,10 +186,6 @@ class Settings(BaseSettings):
             return raw_val
 
 
-# Global settings instance
-settings = Settings()
-
-
 def get_settings() -> Settings:
     """
     Get the global settings instance.
@@ -197,20 +193,32 @@ def get_settings() -> Settings:
     Returns:
         Settings: The application settings.
     """
-    return settings
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+        create_directories(_settings)
+    return _settings
 
 
-def create_directories():
+def create_directories(settings_obj: Optional[Settings] = None):
     """Create necessary directories if they don't exist."""
+    active_settings = settings_obj or get_settings()
     directories = [
-        settings.upload_path,
-        settings.video_output_path,
-        settings.log_path.parent
+        active_settings.upload_path,
+        active_settings.video_output_path,
+        active_settings.log_path.parent
     ]
     
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
 
 
-# Create directories on import
-create_directories()
+class _LazySettingsProxy:
+    """Proxy that defers settings construction until first attribute access."""
+
+    def __getattr__(self, name: str):
+        return getattr(get_settings(), name)
+
+
+_settings: Optional[Settings] = None
+settings = _LazySettingsProxy()
