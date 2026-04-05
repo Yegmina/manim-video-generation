@@ -1,5 +1,6 @@
 from typing import Optional, Dict, Any, List, Tuple
 from collections import Counter
+from dataclasses import dataclass, field
 import logging
 import os
 import re
@@ -9,6 +10,27 @@ from .retry_policy import build_retry_policy, format_retry_policy_lines, extract
 from .validation_report import ValidationReportBuilder
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RetryState:
+    """Structured memory for repeated retry failures and attempted repair directions."""
+
+    risk_counts: Counter = field(default_factory=Counter)
+    strategy_counts: Counter = field(default_factory=Counter)
+
+    def record_error(self, error: str) -> None:
+        text = str(error).strip().lower()
+        if not text:
+            return
+        if "rewrite strategy:" in text:
+            self.strategy_counts[text] += 1
+        else:
+            self.risk_counts[text] += 1
+
+    def observe_errors(self, errors: List[str]) -> None:
+        for item in errors:
+            self.record_error(item)
 
 
 class LLMService:
@@ -985,13 +1007,17 @@ class LLMService:
             f"Return ONLY the corrected Python code."
         )
 
-    def _create_video_error_correction_prompt(self, original_prompt: str, video_errors: Any) -> str:
+    def _create_video_error_correction_prompt(self, original_prompt: str, video_errors: Any, retry_state: Optional[RetryState] = None) -> str:
         """Create a prompt for video compilation error correction."""
         if isinstance(video_errors, list):
             error_history = [str(item).strip() for item in video_errors if str(item).strip()]
         else:
             text = str(video_errors).strip()
             error_history = [text] if text else []
+
+        if retry_state is None:
+            retry_state = RetryState()
+            retry_state.observe_errors(error_history)
 
         policy = build_retry_policy(
             error_history,
@@ -1000,7 +1026,7 @@ class LLMService:
         policy_lines = "\n".join(format_retry_policy_lines(policy))
         error_summary = "; ".join(error_history[-4:]) if error_history else "None"
         style_guidance = self._summarize_layout_style_failures(original_prompt, error_history)
-        repair_memory = self._summarize_repair_memory(error_history)
+        repair_memory = self._summarize_repair_memory(error_history, retry_state=retry_state)
 
         return (
             f"The previous generation attempt(s) failed. Generate corrected, more robust Manim code.\n\n"
@@ -1147,32 +1173,46 @@ class LLMService:
                 )
         return lines
 
-    def _summarize_repair_memory(self, error_history: List[str]) -> str:
+    def _summarize_repair_memory(self, error_history: List[str], retry_state: Optional[RetryState] = None) -> str:
         """Summarize repeated failures/strategies so retries can escalate instead of looping."""
-        normalized = [str(item).strip().lower() for item in error_history if str(item).strip()]
-        counter = Counter(normalized)
+        if retry_state is None:
+            retry_state = RetryState()
+            retry_state.observe_errors(error_history)
+
         lines: List[str] = []
 
-        repeated_quality = [item for item, count in counter.items() if count >= 2 and any(token in item for token in (
-            "portrait_orientation_missing",
-            "formula_uses_text_not_mathtex",
-            "decorative_highlight_box",
-            "horizontal_formula_layout",
-            "wide_horizontal_chain",
-            "weak_equation_alignment",
-            "preview_qa_failed",
-        ))]
+        repeated_quality = [
+            item for item, count in retry_state.risk_counts.items()
+            if count >= 2 and any(token in item for token in (
+                "portrait_orientation_missing",
+                "formula_uses_text_not_mathtex",
+                "decorative_highlight_box",
+                "horizontal_formula_layout",
+                "wide_horizontal_chain",
+                "weak_equation_alignment",
+                "preview_qa_failed",
+            ))
+        ]
         if repeated_quality:
             lines.append("Repeated quality failures detected:")
             lines.extend(f"- {item}" for item in repeated_quality[:5])
             lines.append("Escalation rule: do not repeat the same layout approach that caused these failures.")
             lines.append("Escalation rule: prefer structural rewrites over cosmetic tweaks on the next attempt.")
 
-        repeated_strategies = [item for item, count in counter.items() if count >= 2 and "rewrite strategy:" in item]
+        repeated_strategies = [
+            item for item, count in retry_state.strategy_counts.items()
+            if count >= 2
+        ]
         if repeated_strategies:
             lines.append("Previously suggested rewrite strategies repeated without success:")
             lines.extend(f"- {item}" for item in repeated_strategies[:5])
             lines.append("Escalation rule: combine or strengthen the next repair instead of retrying the same single fix.")
+
+        if retry_state.risk_counts:
+            dominant = retry_state.risk_counts.most_common(3)
+            if dominant:
+                lines.append("Dominant retry risks so far:")
+                lines.extend(f"- {name} (seen {count}x)" for name, count in dominant)
 
         return "\n".join(lines)
 

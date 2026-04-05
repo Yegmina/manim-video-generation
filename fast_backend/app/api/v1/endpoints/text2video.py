@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ....api.deps import get_db, get_current_user_optional
 from ....services.video_service import VideoGenerationService
 from ....services.file_service import FileService
-from ....services.llm_service import LLMService
+from ....services.llm_service import LLMService, RetryState
 from ....services.preview_qa_service import PreviewQAService
 from ....services.retry_policy import encode_preview_qa_error
 from ....models.video import VideoGenerationResponse, VideoQuality, VideoFormat
@@ -153,6 +153,7 @@ async def generate_video_auto_mode(
     video_service = VideoGenerationService(db, file_service)
 
     video_errors = []
+    retry_state = RetryState()
     max_total_attempts = auto_config.max_total_attempts
     preview_qa_service = (
         PreviewQAService(manim_generator=video_service.manim_generator)
@@ -172,15 +173,21 @@ async def generate_video_auto_mode(
 
             if not code or "class GeneratedScene" not in code:
                 video_errors.append("LLM did not return valid GeneratedScene class")
+                if retry_state is not None:
+                    retry_state.record_error("LLM did not return valid GeneratedScene class")
                 continue
             # Disallow use of asset-based classes we don't have (e.g., missing SVG files)
             if "SVGMobject" in code or "ImageMobject" in code:
                 video_errors.append("Usage of SVGMobject or ImageMobject is not allowed without assets")
+                if retry_state is not None:
+                    retry_state.record_error("Usage of SVGMobject or ImageMobject is not allowed without assets")
                 continue
             # Actual compilation check: ensure generated code compiles and is structurally valid
             compilation_result = await llm_service._validate_code_compilation(code)
             if not compilation_result.get("success", False):
                 video_errors.append(f"Compilation error: {compilation_result.get('error')}")
+                if retry_state is not None:
+                    retry_state.record_error(f"Compilation error: {compilation_result.get('error')}")
                 continue
             # Convert code for Manim v0.19+ and re-validate
             from ....services.manim_code_converter import convert_manim_code
@@ -188,6 +195,8 @@ async def generate_video_auto_mode(
             converted_validation = await llm_service._validate_code_compilation(converted_script)
             if not converted_validation.get("success", False):
                 video_errors.append(f"Converted code error: {converted_validation.get('error')}")
+                if retry_state is not None:
+                    retry_state.record_error(f"Converted code error: {converted_validation.get('error')}")
                 continue
             # Use converted script for actual video generation
             code_to_use = converted_script
@@ -195,6 +204,8 @@ async def generate_video_auto_mode(
             quality_risks = llm_service.analyze_quality_risks(prompt=prompt, code=code_to_use)
             if quality_risks:
                 video_errors.extend(quality_risks)
+                if retry_state is not None:
+                    retry_state.observe_errors(quality_risks)
                 continue
 
             preview_report = None
@@ -204,12 +215,13 @@ async def generate_video_auto_mode(
                     scene_name="GeneratedScene",
                 )
                 if not preview_report.get("ok", False):
-                    video_errors.append(
-                        _preview_retry_error(
-                            preview_report=preview_report,
-                            attempt=overall_attempt + 1,
-                        )
+                    preview_error = _preview_retry_error(
+                        preview_report=preview_report,
+                        attempt=overall_attempt + 1,
                     )
+                    video_errors.append(preview_error)
+                    if retry_state is not None:
+                        retry_state.record_error(preview_error)
                     continue
             
             # Create video generation request
@@ -246,6 +258,8 @@ async def generate_video_auto_mode(
                 # Collect the failure and retry
                 err = str(video_error)
                 video_errors.append(err)
+                if retry_state is not None:
+                    retry_state.record_error(err)
                 video_gen.fail(err)
                 db.commit()
                 # Retry if attempts remain
@@ -262,6 +276,8 @@ async def generate_video_auto_mode(
         except Exception as e:
             error_msg = str(e)
             video_errors.append(f"Generation attempt {overall_attempt + 1} failed: {error_msg}")
+            if retry_state is not None:
+                retry_state.record_error(f"Generation attempt {overall_attempt + 1} failed: {error_msg}")
 
             if overall_attempt >= max_total_attempts - 1:
                 raise HTTPException(
