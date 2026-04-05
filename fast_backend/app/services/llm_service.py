@@ -1,4 +1,5 @@
 from typing import Optional, Dict, Any, List, Tuple
+from collections import Counter
 import logging
 import os
 import re
@@ -999,6 +1000,7 @@ class LLMService:
         policy_lines = "\n".join(format_retry_policy_lines(policy))
         error_summary = "; ".join(error_history[-4:]) if error_history else "None"
         style_guidance = self._summarize_layout_style_failures(original_prompt, error_history)
+        repair_memory = self._summarize_repair_memory(error_history)
 
         return (
             f"The previous generation attempt(s) failed. Generate corrected, more robust Manim code.\n\n"
@@ -1008,6 +1010,8 @@ class LLMService:
             f"{policy_lines}\n\n"
             f"LAYOUT / STYLE REPAIR PRIORITIES:\n"
             f"{style_guidance}\n\n"
+            f"REPAIR MEMORY:\n"
+            f"{repair_memory or '- No repeated failure pattern detected yet.'}\n\n"
             f"CRITICAL COMPATIBILITY FIXES:\n"
             f"- Use ONLY 3D coordinates for all points: [x, y, 0] instead of [x, y]\n"
             f"- For Line objects, use: Line(start=[-3, 0, 0], end=[3, 0, 0])\n"
@@ -1142,6 +1146,35 @@ class LLMService:
                     "Rewrite strategy: redistribute objects vertically to use portrait space more evenly."
                 )
         return lines
+
+    def _summarize_repair_memory(self, error_history: List[str]) -> str:
+        """Summarize repeated failures/strategies so retries can escalate instead of looping."""
+        normalized = [str(item).strip().lower() for item in error_history if str(item).strip()]
+        counter = Counter(normalized)
+        lines: List[str] = []
+
+        repeated_quality = [item for item, count in counter.items() if count >= 2 and any(token in item for token in (
+            "portrait_orientation_missing",
+            "formula_uses_text_not_mathtex",
+            "decorative_highlight_box",
+            "horizontal_formula_layout",
+            "wide_horizontal_chain",
+            "weak_equation_alignment",
+            "preview_qa_failed",
+        ))]
+        if repeated_quality:
+            lines.append("Repeated quality failures detected:")
+            lines.extend(f"- {item}" for item in repeated_quality[:5])
+            lines.append("Escalation rule: do not repeat the same layout approach that caused these failures.")
+            lines.append("Escalation rule: prefer structural rewrites over cosmetic tweaks on the next attempt.")
+
+        repeated_strategies = [item for item, count in counter.items() if count >= 2 and "rewrite strategy:" in item]
+        if repeated_strategies:
+            lines.append("Previously suggested rewrite strategies repeated without success:")
+            lines.extend(f"- {item}" for item in repeated_strategies[:5])
+            lines.append("Escalation rule: combine or strengthen the next repair instead of retrying the same single fix.")
+
+        return "\n".join(lines)
 
     def analyze_quality_risks(self, *, prompt: str, code: str) -> List[str]:
         """Detect non-blocking but undesirable style/layout qualities that should trigger repair."""

@@ -318,6 +318,22 @@ def test_build_quality_rewrite_strategy_lines_maps_risks_to_repairs():
     assert "aligning left edges or equals signs" in joined
 
 
+def test_summarize_repair_memory_detects_repeated_failures_and_escalates():
+    llm_service = LLMService()
+    summary = llm_service._summarize_repair_memory(
+        [
+            "horizontal_formula_layout: avoid right-arranged horizontal formula composition in portrait scenes",
+            "horizontal_formula_layout: avoid right-arranged horizontal formula composition in portrait scenes",
+            "Rewrite strategy: replace horizontal row layout with a vertical derivation block using VGroup(...).arrange(DOWN, aligned_edge=LEFT or CENTER).",
+            "Rewrite strategy: replace horizontal row layout with a vertical derivation block using VGroup(...).arrange(DOWN, aligned_edge=LEFT or CENTER).",
+        ]
+    )
+
+    assert "Repeated quality failures detected" in summary
+    assert "Escalation rule: do not repeat the same layout approach" in summary
+    assert "Previously suggested rewrite strategies repeated without success" in summary
+
+
 def test_validate_code_compilation_flags_formula_transform_matching_chain_risks():
     llm_service = LLMService()
     code = r"""
