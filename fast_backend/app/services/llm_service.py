@@ -1397,7 +1397,7 @@ class LLMService:
                 current_prompt = f"{current_prompt}\n{modifier}"
         
         # Phase 1: Primary model with error correction
-        primary_model = auto_config.preferred_models[0] if hasattr(auto_config, 'preferred_models') and auto_config.preferred_models else "gemma-3-27b-it"
+        primary_model = auto_config.preferred_models[0] if hasattr(auto_config, 'preferred_models') and auto_config.preferred_models else "gemini-3.1-pro-preview"
         max_attempts = getattr(auto_config, 'max_llm_attempts_per_phase', 3)
         enable_video_feedback = getattr(auto_config, 'enable_video_error_feedback', True)
         
@@ -1471,20 +1471,11 @@ class LLMService:
                     logger.info("Final phase succeeded with simplified prompt")
                     return result
         
-        # If all phases fail, return a basic working example
-        logger.error("All configurable auto mode phases failed, returning fallback")
-        return (
-            "from manim import *\n\n"
-            "class GeneratedScene(Scene):\n"
-            "    def construct(self):\n"
-            "        # Auto mode fallback - basic animation with proper 3D coordinates\n"
-        "        text = Text('Auto Mode Fallback', font_size=48)\n"
-        "        circle = Circle(radius=1, color=BLUE, fill_opacity=0.3)\n"
-        "        \n"
-        "        self.play(Write(text))\n"
-        "        self.wait(1)\n"
-        "        self.play(Create(circle))\n"
-        "        self.wait(2)\n"
+        # If all phases fail, fail explicitly so callers/users can see the chain exhausted.
+        attempted_models = auto_config.preferred_models if hasattr(auto_config, 'preferred_models') and auto_config.preferred_models else ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash"]
+        logger.error(f"All configurable auto mode phases failed. Attempted models: {attempted_models}")
+        raise RuntimeError(
+            "All preferred generation models failed: " + ", ".join(attempted_models)
         )
 
 

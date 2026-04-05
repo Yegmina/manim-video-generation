@@ -44,8 +44,8 @@ class AutoModeConfig(BaseModel):
     enable_gemini_fallback: bool = Field(default=True, description="Enable Gemini model fallback")
     enable_video_error_feedback: bool = Field(default=True, description="Enable video error feedback for retries")
     enable_preview_qa: bool = Field(default=True, description="Render low-quality preview and run frame-level heuristic QA before final render")
-    preferred_models: List[str] = Field(default=["gemma-3-27b-it", "gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-2.5-flash"], 
-                                       description="Preferred models in order of preference")
+    preferred_models: List[str] = Field(default=["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash"], 
+                                       description="Preferred models in strict order of preference")
     custom_prompt_modifiers: List[str] = Field(default=[], description="Custom prompt modifiers to apply")
 
 

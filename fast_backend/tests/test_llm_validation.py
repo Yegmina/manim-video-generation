@@ -2,6 +2,7 @@ import asyncio
 
 from fast_backend.app.services.llm_service import LLMService
 from fast_backend.app.services.manim_code_converter import convert_manim_code
+from fast_backend.app.api.v1.endpoints.text2video import AutoModeConfig
 from fast_backend.app.models.video import VideoGenerationCreate
 
 
@@ -466,3 +467,12 @@ class GeneratedScene(Scene):
     assert any("projectile_marker_off_trajectory" in item for item in physics_risks)
     assert any("velocity_vectors_detached" in item for item in physics_risks)
     assert any("physics_vector_anchor_mismatch" in item for item in physics_risks)
+
+
+def test_auto_mode_default_model_order_prefers_gemini_chain():
+    cfg = AutoModeConfig()
+    assert cfg.preferred_models == [
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+    ]
