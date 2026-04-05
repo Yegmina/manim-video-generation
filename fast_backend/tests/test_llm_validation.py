@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 from fast_backend.app.services.llm_service import LLMService
 from fast_backend.app.services.manim_code_converter import convert_manim_code
@@ -476,3 +477,9 @@ def test_auto_mode_default_model_order_prefers_gemini_chain():
         "gemini-3-flash-preview",
         "gemini-2.5-flash",
     ]
+
+
+def test_helper_prompt_methods_use_gemini_chain_not_gemma():
+    source = Path("fast_backend/app/services/llm_service.py").read_text()
+    assert 'await self._try_single_generation("gemma-3-27b-it", rewrite_prompt)' not in source
+    assert 'await self._simplify_prompt_with_model(original_prompt, "gemma-3-27b-it")' not in source

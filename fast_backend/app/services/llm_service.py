@@ -367,8 +367,8 @@ class LLMService:
         logger.info("Starting auto mode generation pipeline...")
         
         # Phase 1: Gemma with error correction (3 attempts)
-        logger.info("Phase 1: Trying Gemma with error correction...")
-        result = await self._try_with_error_correction("gemma-3-27b-it", original_prompt, max_attempts=3)
+        logger.info("Phase 1: Trying gemini-3.1-pro-preview with error correction...")
+        result = await self._try_with_error_correction("gemini-3.1-pro-preview", original_prompt, max_attempts=3)
         if result:
             logger.info("Phase 1 succeeded with Gemma")
             return result
@@ -377,7 +377,7 @@ class LLMService:
         logger.info("Phase 2: Rewriting prompt and trying again...")
         rewritten_prompt = await self._rewrite_prompt(original_prompt)
         if rewritten_prompt:
-            result = await self._try_with_error_correction("gemma-3-27b-it", rewritten_prompt, max_attempts=3)
+            result = await self._try_with_error_correction("gemini-3.1-pro-preview", rewritten_prompt, max_attempts=3)
             if result:
                 logger.info("Phase 2 succeeded with rewritten prompt")
                 return result
@@ -386,7 +386,7 @@ class LLMService:
         logger.info("Phase 3: Simplifying prompt and trying again...")
         simplified_prompt = await self._simplify_prompt(original_prompt)
         if simplified_prompt:
-            result = await self._try_with_error_correction("gemma-3-27b-it", simplified_prompt, max_attempts=3)
+            result = await self._try_with_error_correction("gemini-3.1-pro-preview", simplified_prompt, max_attempts=3)
             if result:
                 logger.info("Phase 3 succeeded with simplified prompt")
                 return result
@@ -407,7 +407,7 @@ class LLMService:
         
         # Phase 6: Final attempt - Simplify with Flash Lite, then try Flash
         logger.info("Phase 6: Final attempt with simplified prompt...")
-        final_simplified = await self._simplify_prompt_with_model(original_prompt, "gemini-2.5-flash-lite")
+        final_simplified = await self._simplify_prompt_with_model(original_prompt, "gemini-2.5-flash")
         if final_simplified:
             result = await self._try_single_generation("gemini-2.5-flash", final_simplified)
             if result:
@@ -900,7 +900,7 @@ class LLMService:
                 return None
 
     async def _rewrite_prompt(self, original_prompt: str) -> Optional[str]:
-        """Rewrite the prompt using Gemma to make it clearer."""
+        """Rewrite the prompt using the Gemini preference chain."""
         rewrite_prompt = (
             "Rewrite the following video description to be clearer and more specific for Manim code generation. "
             "Focus on concrete visual elements, animations, and mathematical concepts. "
@@ -908,16 +908,24 @@ class LLMService:
             "Return ONLY the rewritten description, no other text.\n\n"
             f"Original: {original_prompt}"
         )
-        
-        try:
-            return await self._try_single_generation("gemma-3-27b-it", rewrite_prompt)
-        except Exception as e:
-            logger.warning(f"Prompt rewriting failed: {e}")
-            return None
+
+        helper_models = ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash"]
+        for model in helper_models:
+            try:
+                rewritten = await self._try_single_generation(model, rewrite_prompt)
+                if rewritten:
+                    return rewritten
+            except Exception as e:
+                logger.warning(f"Prompt rewriting failed with {model}: {e}")
+        return None
 
     async def _simplify_prompt(self, original_prompt: str) -> Optional[str]:
-        """Simplify the prompt using Gemma."""
-        return await self._simplify_prompt_with_model(original_prompt, "gemma-3-27b-it")
+        """Simplify the prompt using the Gemini preference chain."""
+        for model in ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash"]:
+            simplified = await self._simplify_prompt_with_model(original_prompt, model)
+            if simplified:
+                return simplified
+        return None
 
     async def _simplify_prompt_with_model(self, original_prompt: str, model: str) -> Optional[str]:
         """Simplify the prompt using specified model."""
@@ -1314,8 +1322,8 @@ class LLMService:
         video_errors = video_errors or []
         
         # Phase 1: Gemma with error correction (3 attempts) - incorporate video errors
-        logger.info("Phase 1: Trying Gemma with error correction...")
-        result = await self._try_with_error_correction("gemma-3-27b-it", original_prompt, max_attempts=3, video_errors=video_errors)
+        logger.info("Phase 1: Trying gemini-3.1-pro-preview with error correction...")
+        result = await self._try_with_error_correction("gemini-3.1-pro-preview", original_prompt, max_attempts=3, video_errors=video_errors)
         if result:
             logger.info("Phase 1 succeeded with Gemma")
             return result
@@ -1324,7 +1332,7 @@ class LLMService:
         logger.info("Phase 2: Rewriting prompt and trying again...")
         rewritten_prompt = await self._rewrite_prompt(original_prompt)
         if rewritten_prompt:
-            result = await self._try_with_error_correction("gemma-3-27b-it", rewritten_prompt, max_attempts=3, video_errors=video_errors)
+            result = await self._try_with_error_correction("gemini-3.1-pro-preview", rewritten_prompt, max_attempts=3, video_errors=video_errors)
             if result:
                 logger.info("Phase 2 succeeded with rewritten prompt")
                 return result
@@ -1333,7 +1341,7 @@ class LLMService:
         logger.info("Phase 3: Simplifying prompt and trying again...")
         simplified_prompt = await self._simplify_prompt(original_prompt)
         if simplified_prompt:
-            result = await self._try_with_error_correction("gemma-3-27b-it", simplified_prompt, max_attempts=3, video_errors=video_errors)
+            result = await self._try_with_error_correction("gemini-3.1-pro-preview", simplified_prompt, max_attempts=3, video_errors=video_errors)
             if result:
                 logger.info("Phase 3 succeeded with simplified prompt")
                 return result
@@ -1358,7 +1366,7 @@ class LLMService:
         
         # Phase 6: Final attempt - Simplify with Flash Lite, then try Flash
         logger.info("Phase 6: Final attempt with simplified prompt...")
-        final_simplified = await self._simplify_prompt_with_model(original_prompt, "gemini-2.5-flash-lite")
+        final_simplified = await self._simplify_prompt_with_model(original_prompt, "gemini-2.5-flash")
         if final_simplified:
             if video_errors:
                 enhanced_prompt = self._create_video_error_correction_prompt(final_simplified, video_errors)
