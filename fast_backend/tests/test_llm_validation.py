@@ -298,6 +298,26 @@ class GeneratedScene(Scene):
     assert any("horizontal_formula_layout" in item for item in risks)
 
 
+def test_build_quality_rewrite_strategy_lines_maps_risks_to_repairs():
+    llm_service = LLMService()
+    lines = llm_service._build_quality_rewrite_strategy_lines(
+        [
+            "portrait_orientation_missing: expected explicit 9:16 portrait config",
+            "formula_uses_text_not_mathtex: equations should use MathTex",
+            "decorative_highlight_box: remove decorative rectangles/boxes in formula scenes",
+            "horizontal_formula_layout: avoid right-arranged horizontal formula composition in portrait scenes",
+            "weak_equation_alignment: vertical derivation stack lacks explicit alignment",
+        ]
+    )
+
+    joined = "\n".join(lines)
+    assert "inject explicit portrait config" in joined
+    assert "replace equation Text(...) objects with MathTex(...)" in joined
+    assert "delete decorative Rectangle/SurroundingRectangle" in joined
+    assert "replace horizontal row layout with a vertical derivation block" in joined
+    assert "aligning left edges or equals signs" in joined
+
+
 def test_validate_code_compilation_flags_formula_transform_matching_chain_risks():
     llm_service = LLMService()
     code = r"""

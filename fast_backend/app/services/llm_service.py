@@ -1088,6 +1088,9 @@ class LLMService:
             if "mathtex" in lower and "text" in lower:
                 lines.append("Prefer MathTex for equations instead of Text.")
 
+        strategy_lines = self._build_quality_rewrite_strategy_lines(video_errors)
+        lines.extend(strategy_lines)
+
         if not lines:
             lines.append("Simplify layout and remove nonessential decorative elements.")
 
@@ -1098,6 +1101,47 @@ class LLMService:
                 seen.add(line)
                 deduped.append(line)
         return "\n".join(f"- {line}" for line in deduped)
+
+    def _build_quality_rewrite_strategy_lines(self, quality_errors: List[str]) -> List[str]:
+        """Map quality risk codes to concrete rewrite strategies for targeted repair."""
+        lines: List[str] = []
+        for raw in quality_errors:
+            item = str(raw).strip().lower()
+            if not item:
+                continue
+            if "portrait_orientation_missing" in item:
+                lines.append(
+                    "Rewrite strategy: inject explicit portrait config (pixel_width=1080, pixel_height=1920, frame_width=9, frame_height=16) near the top of the file."
+                )
+            if "formula_uses_text_not_mathtex" in item:
+                lines.append(
+                    "Rewrite strategy: replace equation Text(...) objects with MathTex(...) while preserving the derivation content."
+                )
+            if "decorative_highlight_box" in item:
+                lines.append(
+                    "Rewrite strategy: delete decorative Rectangle/SurroundingRectangle highlight objects and use color/emphasis on the final equation instead."
+                )
+            if "horizontal_formula_layout" in item or "wide_horizontal_chain" in item:
+                lines.append(
+                    "Rewrite strategy: replace horizontal row layout with a vertical derivation block using VGroup(...).arrange(DOWN, aligned_edge=LEFT or CENTER)."
+                )
+            if "weak_equation_alignment" in item:
+                lines.append(
+                    "Rewrite strategy: enforce a stable equation column by explicitly aligning left edges or equals signs across derivation steps."
+                )
+            if "dense_horizontal_label_band" in item:
+                lines.append(
+                    "Rewrite strategy: reduce dense lower-band content and keep formula groups compact and centered."
+                )
+            if "border_crowding" in item:
+                lines.append(
+                    "Rewrite strategy: increase margins and pull objects inward from edges before adding any new content."
+                )
+            if "top_bottom_empty_imbalance" in item:
+                lines.append(
+                    "Rewrite strategy: redistribute objects vertically to use portrait space more evenly."
+                )
+        return lines
 
     def analyze_quality_risks(self, *, prompt: str, code: str) -> List[str]:
         """Detect non-blocking but undesirable style/layout qualities that should trigger repair."""
