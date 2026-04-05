@@ -23,6 +23,9 @@ class VerticalVideoService:
         plan = self.plan_video(request)
         return self.builder.build_script(plan)
 
+    def build_script_from_plan(self, plan: VerticalVideoPlan) -> str:
+        return self.builder.build_script(plan)
+
     def render_video(
         self,
         request: VerticalVideoRequest,

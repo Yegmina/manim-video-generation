@@ -1,0 +1,47 @@
+{
+  "topic": "Projectile motion",
+  "family": "physics",
+  "goal": "explain how horizontal and vertical velocity create a curved path",
+  "audience_age": "teen",
+  "tone": "clear",
+  "duration_bucket": "short",
+  "visual_style": "clean",
+  "constraints": [
+    "portrait 9:16 only",
+    "show a single projectile arc",
+    "keep labels compact"
+  ],
+  "supporting_points": [
+    "Horizontal velocity keeps pushing the ball forward.",
+    "Gravity changes the vertical part, so the path bends.",
+    "Both arrows stay attached to the same moving object."
+  ],
+  "kinematics": {
+    "motion_type": "projectile",
+    "equation_text": "y = 0.95x - 0.09x^2",
+    "trajectory_expression": "0.95*x - 0.09*x^2",
+    "x_range": [0.0, 8.0],
+    "y_range": [0.0, 5.0],
+    "marker_x": 4.0,
+    "phases": [
+      {
+        "label": "Launch",
+        "duration_seconds": 1.2,
+        "velocity_x": 3.8,
+        "velocity_y": 2.8
+      },
+      {
+        "label": "Apex approach",
+        "duration_seconds": 1.2,
+        "velocity_x": 3.8,
+        "velocity_y": 1.0
+      },
+      {
+        "label": "Falling",
+        "duration_seconds": 1.2,
+        "velocity_x": 3.8,
+        "velocity_y": -1.4
+      }
+    ]
+  }
+}
