@@ -1,9 +1,10 @@
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import logging
 import os
 import re
 
 from ..core.config import settings
+from .retry_policy import build_retry_policy, format_retry_policy_lines
 from .validation_report import ValidationReportBuilder
 
 logger = logging.getLogger(__name__)
@@ -16,12 +17,49 @@ class LLMService:
     to integrate with real providers such as Google Gemini, OpenAI, Anthropic, etc.
     """
 
+    _GENERIC_SYSTEM_PROMPT = (
+        "You are an expert Manim developer. Given a user description, "
+        "return ONLY valid Python code that defines a Scene subclass named "
+        "'GeneratedScene' which fulfils the request. "
+        "Do not include markdown formatting, code blocks, or any explanations. "
+        "Return only the raw Python code starting with 'from manim import *'."
+    )
+
+    _PORTRAIT_GRAPH_SCENE_GUARDRAILS = (
+        "Portrait graph scene guardrails (educational 9:16 layout): "
+        "Use sparse axis ticks and short labels; avoid dense tick labels. "
+        "If using pi labels, include each value once only (no duplicate pi labels). "
+        "Do not place legends in the top-right plot area; prefer below/left/outside the graph. "
+        "Keep visible margins from all frame borders and avoid objects too close to edges. "
+        "Avoid tall vertical stacks of title+axes+formula+paragraph; keep at most one short annotation below axes."
+    )
+    _FORMULA_ONLY_SCENE_GUARDRAILS = (
+        "Formula-only derivation guardrails (readability first): "
+        "Use a simple step-by-step derivation with short MathTex lines and clear spacing. "
+        "Prefer 3 to 5 steps max, one focal equation block at a time. "
+        "For portrait/Shorts-style requests, explicitly configure a 9:16 portrait scene using config.pixel_width = 1080, config.pixel_height = 1920, config.frame_width = 9, config.frame_height = 16. "
+        "In portrait formula scenes, stack derivation steps vertically with VGroup(...).arrange(DOWN, aligned_edge=LEFT or CENTER) rather than laying terms out in long horizontal rows. "
+        "Keep the equals signs and step starts visually aligned where practical. "
+        "Avoid decorative backgrounds, extra shapes, rectangles, braces, underlines, dense text paragraphs, and visual overengineering unless explicitly requested. "
+        "Prefer reliable animations: Write/FadeIn for reveals, ReplacementTransform for simple 1:1 swaps. "
+        "Use TransformMatchingTex sparingly and only for clearly safe single-step token-preserving updates; "
+        "avoid key_map-heavy transforms and long step-morph chains. "
+        "If uncertain, use staged FadeOut + Write between steps. Keep object count low."
+    )
+
     # Mapping of friendly model names to provider + model identifiers
     _MODEL_MAP: Dict[str, Dict[str, Any]] = {
         # provider, model name, additional kwargs if necessary
+        "gemini-3.1-pro-preview": {"provider": "google", "model": "gemini-3.1-pro-preview"},
+        "gemini-3-flash-preview": {"provider": "google", "model": "gemini-3-flash-preview"},
+        "gemini-3.1-flash-lite-preview": {"provider": "google", "model": "gemini-3.1-flash-lite-preview"},
         "gemini-2.5-flash": {"provider": "google", "model": "gemini-2.5-flash"},
         "gemini-2.5-pro": {"provider": "google", "model": "gemini-2.5-pro"},
         "gemini-2.5-flash-lite": {"provider": "google", "model": "gemini-2.5-flash-lite"},
+        "gemini-flash-latest": {"provider": "google", "model": "gemini-flash-latest"},
+        "gemini-pro-latest": {"provider": "google", "model": "gemini-pro-latest"},
+        "gemini-2.5-flash-latest": {"provider": "google", "model": "gemini-2.5-flash-latest"},
+        "gemini-2.5-pro-latest": {"provider": "google", "model": "gemini-2.5-pro-latest"},
         "gemma-3-27b-it": {"provider": "google", "model": "gemma-3-27b-it"},
         "gemma-3-9b-it": {"provider": "google", "model": "gemma-3-9b-it"},
         "gpt-4o": {"provider": "openai", "model": "gpt-4o"},
@@ -31,27 +69,16 @@ class LLMService:
     # Model-specific system prompts
     _SYSTEM_PROMPTS: Dict[str, str] = {
         # Gemini models - more up-to-date, need less guidance
-        "gemini-2.5-flash": (
-            "You are an expert Manim developer. Given a user description, "
-            "return ONLY valid Python code that defines a Scene subclass named "
-            "'GeneratedScene' which fulfils the request. "
-            "Do not include markdown formatting, code blocks, or any explanations. "
-            "Return only the raw Python code starting with 'from manim import *'."
-        ),
-        "gemini-2.5-pro": (
-            "You are an expert Manim developer. Given a user description, "
-            "return ONLY valid Python code that defines a Scene subclass named "
-            "'GeneratedScene' which fulfils the request. "
-            "Do not include markdown formatting, code blocks, or any explanations. "
-            "Return only the raw Python code starting with 'from manim import *'."
-        ),
-        "gemini-2.5-flash-lite": (
-            "You are an expert Manim developer. Given a user description, "
-            "return ONLY valid Python code that defines a Scene subclass named "
-            "'GeneratedScene' which fulfils the request. "
-            "Do not include markdown formatting, code blocks, or any explanations. "
-            "Return only the raw Python code starting with 'from manim import *'."
-        ),
+        "gemini-3.1-pro-preview": _GENERIC_SYSTEM_PROMPT,
+        "gemini-3-flash-preview": _GENERIC_SYSTEM_PROMPT,
+        "gemini-3.1-flash-lite-preview": _GENERIC_SYSTEM_PROMPT,
+        "gemini-2.5-flash": _GENERIC_SYSTEM_PROMPT,
+        "gemini-2.5-pro": _GENERIC_SYSTEM_PROMPT,
+        "gemini-2.5-flash-lite": _GENERIC_SYSTEM_PROMPT,
+        "gemini-flash-latest": _GENERIC_SYSTEM_PROMPT,
+        "gemini-pro-latest": _GENERIC_SYSTEM_PROMPT,
+        "gemini-2.5-flash-latest": _GENERIC_SYSTEM_PROMPT,
+        "gemini-2.5-pro-latest": _GENERIC_SYSTEM_PROMPT,
         # Gemma models - need specific API guidance for current Manim version
         "gemma-3-27b-it": (
             "You are an expert Manim developer. Given a user description, "
@@ -90,13 +117,7 @@ class LLMService:
             "Return only the raw Python code starting with 'from manim import *'."
         ),
         # Default for unknown models
-        "default": (
-            "You are an expert Manim developer. Given a user description, "
-            "return ONLY valid Python code that defines a Scene subclass named "
-            "'GeneratedScene' which fulfils the request. "
-            "Do not include markdown formatting, code blocks, or any explanations. "
-            "Return only the raw Python code starting with 'from manim import *'."
-        ),
+        "default": _GENERIC_SYSTEM_PROMPT,
     }
 
     def __init__(self):
@@ -143,7 +164,7 @@ class LLMService:
                 
                 # Prepare the prompt
                 system_prompt = self._SYSTEM_PROMPTS.get(model, self._SYSTEM_PROMPTS["default"])
-                full_prompt = f"{system_prompt}\n\nUser request: {prompt}"
+                full_prompt = self._build_generation_prompt(system_prompt, prompt)
                 
                 contents = [
                     types.Content(
@@ -192,6 +213,121 @@ class LLMService:
             "        circle = Circle(radius=1, color=BLUE, fill_opacity=0.5)\n"
             "        self.play(Create(circle), run_time=2)\n"
             "        self.wait(1)\n"
+        )
+
+    def _build_generation_prompt(self, system_prompt: str, user_prompt: str) -> str:
+        """Build model prompt and append portrait-graph guardrails when relevant."""
+        prompt_sections = [system_prompt]
+        if self._is_portrait_graph_scene_request(user_prompt):
+            prompt_sections.append(self._PORTRAIT_GRAPH_SCENE_GUARDRAILS)
+        if self._is_formula_only_scene_request(user_prompt):
+            prompt_sections.append(self._FORMULA_ONLY_SCENE_GUARDRAILS)
+            if self._is_portrait_request(user_prompt):
+                prompt_sections.append(
+                    "Portrait formula layout requirement: the final composition must read clearly in 9:16. "
+                    "Do not spread derivation terms across the width of the frame. "
+                    "Use vertically stacked equations centered in the portrait frame, with consistent alignment and generous side margins."
+                )
+        prompt_sections.append(f"User request: {user_prompt}")
+        return "\n\n".join(prompt_sections)
+
+    def _is_portrait_graph_scene_request(self, prompt: str) -> bool:
+        """Detect portrait educational graph requests that benefit from extra layout guidance."""
+        normalized = prompt.lower()
+        has_graph_terms = any(
+            term in normalized
+            for term in (
+                "graph",
+                "plot",
+                "axes",
+                "axis",
+                "coordinate",
+                "function",
+                "parabola",
+                "sine",
+                "cosine",
+                "trigonometric",
+            )
+        )
+        has_portrait_terms = any(
+            term in normalized
+            for term in (
+                "portrait",
+                "vertical",
+                "9:16",
+                "1080x1920",
+                "1080 x 1920",
+                "shorts",
+                "reel",
+                "tiktok",
+            )
+        )
+        has_educational_terms = any(
+            term in normalized
+            for term in (
+                "educational",
+                "explain",
+                "lesson",
+                "teaching",
+                "tutorial",
+                "students",
+                "class",
+            )
+        )
+        return has_graph_terms and has_portrait_terms and has_educational_terms
+
+    def _is_formula_only_scene_request(self, prompt: str) -> bool:
+        """Detect formula-centric requests that should prefer lean derivation layouts."""
+        normalized = prompt.lower()
+        has_formula_terms = any(
+            term in normalized
+            for term in (
+                "formula-only",
+                "formula only",
+                "derivation",
+                "derive",
+                "identity",
+                "mathtex",
+                "equation",
+            )
+        )
+        has_graph_terms = any(
+            term in normalized
+            for term in (
+                "graph",
+                "plot",
+                "axes",
+                "axis",
+                "coordinate plane",
+                "numberplane",
+            )
+        )
+        explicitly_excludes_graphs = any(
+            term in normalized
+            for term in (
+                "no graph",
+                "without graph",
+                "no axes",
+                "without axes",
+            )
+        )
+        return has_formula_terms and (not has_graph_terms or explicitly_excludes_graphs)
+
+    def _is_portrait_request(self, prompt: str) -> bool:
+        """Detect portrait-oriented requests regardless of scene family."""
+        normalized = prompt.lower()
+        return any(
+            term in normalized
+            for term in (
+                "portrait",
+                "vertical",
+                "9:16",
+                "1080x1920",
+                "1080 x 1920",
+                "shorts",
+                "reel",
+                "tiktok",
+            )
         )
 
     async def _auto_mode_generate(self, original_prompt: str) -> str:
@@ -275,35 +411,43 @@ class LLMService:
         """Try generating code with error correction loop and compilation validation."""
         current_prompt = prompt
         video_errors = video_errors or []
-        
+
         # If we have video errors from previous attempts, incorporate them
         if video_errors:
-            error_summary = "; ".join(video_errors[-3:])  # Use last 3 errors
-            current_prompt = self._create_video_error_correction_prompt(prompt, error_summary)
+            current_prompt = self._create_video_error_correction_prompt(prompt, video_errors)
             logger.info(f"Using video error correction prompt with {len(video_errors)} previous errors")
-        
+
         for attempt in range(max_attempts):
             logger.info(f"Attempt {attempt + 1}/{max_attempts} with {model}")
-            
+
             try:
                 code = await self._try_single_generation(model, current_prompt)
-                
+
                 # If no code was generated, try next attempt
                 if not code:
                     logger.warning(f"No code generated on attempt {attempt + 1}")
                     if attempt < max_attempts - 1:
                         current_prompt = self._create_error_correction_prompt(prompt, "", "No code was generated")
                     continue
-                
+
                 # Validate basic syntax first
                 if not self._validate_basic_syntax(code):
                     logger.warning(f"Basic syntax validation failed on attempt {attempt + 1}")
+                    repaired_code, repaired_ok, repaired_error = await self._attempt_code_repair(
+                        model=model,
+                        original_prompt=prompt,
+                        broken_code=code,
+                        issue_text=self._analyze_code_issues(code),
+                    )
+                    if repaired_ok and repaired_code:
+                        logger.info(f"Structured code repair succeeded on attempt {attempt + 1}")
+                        return repaired_code
                     if attempt < max_attempts - 1:
-                        error_msg = self._analyze_code_issues(code)
+                        error_msg = repaired_error or self._analyze_code_issues(code)
                         current_prompt = self._create_error_correction_prompt(prompt, code, error_msg)
                         logger.info(f"Generated error correction prompt for attempt {attempt + 2}")
                     continue
-                
+
                 # Try to compile and validate the code more thoroughly
                 compilation_result = await self._validate_code_compilation(code)
                 if compilation_result["success"]:
@@ -311,20 +455,86 @@ class LLMService:
                     return code
                 else:
                     logger.warning(f"Code compilation failed on attempt {attempt + 1}: {compilation_result['error']}")
+                    repaired_code, repaired_ok, repaired_error = await self._attempt_code_repair(
+                        model=model,
+                        original_prompt=prompt,
+                        broken_code=code,
+                        issue_text=compilation_result["error"],
+                    )
+                    if repaired_ok and repaired_code:
+                        logger.info(f"Structured code repair succeeded after compilation failure on attempt {attempt + 1}")
+                        return repaired_code
                     if attempt < max_attempts - 1:
-                        current_prompt = self._create_error_correction_prompt(prompt, code, compilation_result['error'])
+                        current_prompt = self._create_error_correction_prompt(
+                            prompt,
+                            code,
+                            repaired_error or compilation_result["error"],
+                        )
                         logger.info(f"Generated compilation error correction prompt for attempt {attempt + 2}")
-                
+
             except Exception as e:
                 logger.warning(f"Attempt {attempt + 1} failed: {e}")
                 if attempt < max_attempts - 1:
                     current_prompt = self._create_error_correction_prompt(prompt, "", str(e))
-        
+
         return None
+
+    async def _attempt_code_repair(
+        self,
+        *,
+        model: str,
+        original_prompt: str,
+        broken_code: str,
+        issue_text: str,
+    ) -> Tuple[Optional[str], bool, str]:
+        """Ask the model to repair previously generated code and revalidate it."""
+        repair_prompt = self._create_structured_code_repair_prompt(
+            original_prompt=original_prompt,
+            broken_code=broken_code,
+            issue_text=issue_text,
+        )
+        try:
+            repaired_code = await self._try_single_generation(model, repair_prompt)
+        except Exception as exc:
+            return None, False, f"repair_generation_failed: {exc}"
+
+        if not repaired_code:
+            return None, False, "repair_generation_failed: no code returned"
+
+        if not self._validate_basic_syntax(repaired_code):
+            return None, False, self._analyze_code_issues(repaired_code)
+
+        repaired_validation = await self._validate_code_compilation(repaired_code)
+        if repaired_validation.get("success", False):
+            return repaired_code, True, ""
+
+        return None, False, repaired_validation.get("error", "repair_validation_failed")
+
+    def _create_structured_code_repair_prompt(self, *, original_prompt: str, broken_code: str, issue_text: str) -> str:
+        """Create a targeted repair prompt that asks the model to modify existing code."""
+        return (
+            "You previously generated Manim code that needs repair.\n\n"
+            "Task: modify the existing code to fix the issues below while preserving the original educational intent.\n"
+            "Do NOT start from scratch unless the code is unusable.\n"
+            "Think like a code repair model: inspect the code, fix the smallest necessary set of problems, and return the full corrected file.\n"
+            "Return ONLY raw Python code beginning with 'from manim import *'.\n\n"
+            f"Original user request:\n{original_prompt}\n\n"
+            f"Detected issues:\n{issue_text}\n\n"
+            "Repair requirements:\n"
+            "- Keep class name GeneratedScene.\n"
+            "- Preserve working parts when possible.\n"
+            "- Remove or replace unsupported/deprecated Manim APIs.\n"
+            "- If layout/readability is part of the issue, simplify the layout instead of adding more objects.\n"
+            "- For formula scenes, prefer MathTex, portrait-safe spacing, vertical stacking, and no decorative highlight shapes unless explicitly requested.\n"
+            "- If an element causes errors or clutter, delete it rather than improvising something flashy.\n\n"
+            f"Code to repair:\n{broken_code}"
+        )
 
     async def _validate_code_compilation(self, code: str) -> dict:
         """Validate that the generated code can be compiled and has proper structure."""
         report = ValidationReportBuilder()
+        for issue in self._analyze_static_code_correctness_issues(code):
+            report.add_error(issue["code"], issue["message"], issue.get("evidence"))
 
         try:
             # Try to compile the code
@@ -382,6 +592,39 @@ class LLMService:
             report.add_error("compilation_error", f"Compilation error: {e}")
             return report.to_result()
 
+    def _analyze_static_code_correctness_issues(self, code: str) -> List[Dict[str, str]]:
+        """Detect malformed repeated-kwarg constructs seen in generated code."""
+        issues: List[Dict[str, str]] = []
+
+        repeated_kwarg_token_pattern = re.compile(r"\b([A-Za-z_]\w*)\s*=\s*\1\s*=")
+        repeated_token_matches = list(repeated_kwarg_token_pattern.finditer(code))
+        if repeated_token_matches:
+            evidence = ", ".join(match.group(0) for match in repeated_token_matches[:3])
+            issues.append(
+                {
+                    "code": "malformed_repeated_kwarg_assignment",
+                    "message": "Malformed repeated keyword assignment pattern detected (e.g., color= color=).",
+                    "evidence": evidence,
+                }
+            )
+
+        duplicate_kwarg_pattern = re.compile(
+            r"\b([A-Za-z_]\w*)\s*=\s*[^,\n()]+,\s*\1\s*=",
+            re.MULTILINE,
+        )
+        duplicate_kwarg_matches = list(duplicate_kwarg_pattern.finditer(code))
+        if duplicate_kwarg_matches:
+            evidence = ", ".join(match.group(0) for match in duplicate_kwarg_matches[:3])
+            issues.append(
+                {
+                    "code": "duplicate_keyword_assignment",
+                    "message": "Duplicate keyword argument assignment detected inside a call.",
+                    "evidence": evidence,
+                }
+            )
+
+        return issues
+
     def _analyze_static_layout_risks(self, code: str) -> List[Dict[str, str]]:
         """Heuristic static checks for likely layout overlap/crowding/off-screen issues."""
         risks: List[Dict[str, str]] = []
@@ -437,6 +680,178 @@ class LLMService:
                     "evidence": f"text_objects={text_obj_count}, fadeouts={fadeout_count}",
                 }
             )
+
+        # Graph-heavy vertical scene heuristics (static/pattern-based only).
+        has_graph_context = bool(
+            re.search(r"\b(Axes|NumberPlane|ComplexPlane)\s*\(", code)
+            or re.search(r"\.(plot|get_graph)\s*\(", code)
+        )
+        has_title_object = bool(re.search(r"\b(title|heading)\w*\s*=\s*(Text|Tex|MathTex|Title)\s*\(", code, re.IGNORECASE))
+        title_up_anchor_count = len(
+            re.findall(
+                r"\b(title|heading)\w*\.(to_edge|to_corner)\(\s*(UP|UL|UR)\s*\)",
+                code,
+                re.IGNORECASE,
+            )
+        )
+        has_formula_or_explanation = bool(
+            re.search(
+                r"\b(formula|equation|eqn|explanation|description|desc|annotation|note)\w*\s*=\s*(Text|MathTex|Tex|Paragraph|MarkupText)\s*\(",
+                code,
+                re.IGNORECASE,
+            )
+        )
+
+        down_next_to_count = len(re.findall(r"\.next_to\([^)]*,\s*DOWN\b", code))
+        below_axes_count = len(re.findall(r"\.next_to\(\s*\w*(axes|axis)\w*\s*,\s*DOWN\b", code, re.IGNORECASE))
+        below_axes_annotation_count = len(
+            re.findall(
+                r"\b(formula|equation|eqn|annotation|text|description|desc|explanation|note)\w*\.next_to\(\s*\w*(axes|axis)\w*\s*,\s*DOWN\b",
+                code,
+                re.IGNORECASE,
+            )
+        )
+        below_axes_annotation_count += len(
+            re.findall(
+                r"\b(formula|equation|eqn|annotation|text|description|desc|explanation|note)\w*\s*=\s*(Text|MathTex|Tex|Paragraph|MarkupText)\s*\([^)]*\)\.next_to\(\s*\w*(axes|axis)\w*\s*,\s*DOWN\b",
+                code,
+                re.IGNORECASE,
+            )
+        )
+
+        graph_label_count = len(re.findall(r"\.get_graph_label\s*\(", code))
+        axis_label_count = len(re.findall(r"\.get_(x_axis_label|y_axis_label|axis_labels)\s*\(", code))
+
+        has_legend_var = bool(re.search(r"\blegend\w*\s*=", code, re.IGNORECASE))
+        legend_corner_like_count = len(
+            re.findall(
+                r"\blegend\w*\.(to_corner\(\s*(UR|UL)\s*\)|to_edge\(\s*(RIGHT|UP)\s*\)|next_to\([^)]*,\s*(UR|UP|RIGHT)\b)",
+                code,
+                re.IGNORECASE,
+            )
+        )
+
+        if has_graph_context and (has_title_object or title_up_anchor_count > 0) and has_formula_or_explanation and down_next_to_count >= 2:
+            risks.append(
+                {
+                    "code": "graph_vertical_stack_crowding_risk",
+                    "message": "Graph scene stacks title + graph + formula/explanation vertically; crowding risk in portrait layouts.",
+                    "evidence": (
+                        f"title_up={title_up_anchor_count}, formula_or_explanation={has_formula_or_explanation}, "
+                        f"next_to_down={down_next_to_count}"
+                    ),
+                }
+            )
+
+        if (
+            has_graph_context
+            and graph_label_count > 0
+            and (has_title_object or title_up_anchor_count > 0)
+            and (axis_label_count > 0 or has_formula_or_explanation or below_axes_count > 0)
+        ):
+            risks.append(
+                {
+                    "code": "graph_label_collision_risk",
+                    "message": "get_graph_label is used in a busy graph scene (title/axes/formula); label collision risk is elevated.",
+                    "evidence": (
+                        f"graph_labels={graph_label_count}, axis_labels={axis_label_count}, "
+                        f"title={has_title_object or title_up_anchor_count > 0}, below_axes={below_axes_count}"
+                    ),
+                }
+            )
+
+        if has_graph_context and has_legend_var and legend_corner_like_count > 0:
+            risks.append(
+                {
+                    "code": "legend_plot_overlap_risk",
+                    "message": "Legend positioned in/near upper-right plot area may overlap graph content.",
+                    "evidence": f"legend_corner_like_placements={legend_corner_like_count}",
+                }
+            )
+
+        if down_next_to_count >= 4:
+            risks.append(
+                {
+                    "code": "vertical_chain_crowding_risk",
+                    "message": "Many next_to(..., DOWN, ...) placements indicate a tall vertical chain likely to overflow.",
+                    "evidence": f"next_to_down={down_next_to_count}",
+                }
+            )
+
+        if has_graph_context and below_axes_annotation_count > 0 and (down_next_to_count >= 3 or (has_title_object and has_formula_or_explanation)):
+            risks.append(
+                {
+                    "code": "below_axes_annotation_overflow_risk",
+                    "message": "Formula/text annotations below axes in a tall graph scene can clip or fall off-screen.",
+                    "evidence": (
+                        f"below_axes_annotations={below_axes_annotation_count}, next_to_down={down_next_to_count}, "
+                        f"title={has_title_object}"
+                    ),
+                }
+            )
+
+        # Formula-only animation safety heuristics (static/pattern-based only).
+        mathtex_count = len(re.findall(r"\b(MathTex|Tex)\s*\(", code))
+        text_count = len(re.findall(r"\bText\s*\(", code))
+        formula_only_context = (
+            not has_graph_context
+            and mathtex_count >= 2
+            and text_count <= 2
+        )
+        if formula_only_context:
+            transform_matching_count = len(re.findall(r"\bTransformMatchingTex\s*\(", code))
+            replacement_transform_count = len(re.findall(r"\bReplacementTransform\s*\(", code))
+            transform_count = len(re.findall(r"\bTransform\s*\(", code))
+            total_morph_count = transform_matching_count + replacement_transform_count + transform_count
+            key_map_occurrence_count = len(re.findall(r"\bkey_map\s*=", code))
+
+            if transform_matching_count >= 2:
+                risks.append(
+                    {
+                        "code": "formula_transform_matching_chain_risk",
+                        "message": (
+                            "Formula-only scene uses multiple TransformMatchingTex steps; long morph chains are fragile. "
+                            "Prefer staged Write/FadeIn or simple ReplacementTransform."
+                        ),
+                        "evidence": f"TransformMatchingTex calls={transform_matching_count}",
+                    }
+                )
+
+            if key_map_occurrence_count > 0:
+                key_map_entry_counts = [
+                    len(re.findall(r":", snippet))
+                    for snippet in re.findall(r"key_map\s*=\s*\{([^}]*)\}", code, re.DOTALL)
+                ]
+                max_key_map_entries = max(key_map_entry_counts, default=0)
+                if key_map_occurrence_count >= 2 or max_key_map_entries >= 3:
+                    risks.append(
+                        {
+                            "code": "formula_key_map_transform_risk",
+                            "message": (
+                                "Formula-only scene relies on key_map-heavy TransformMatchingTex mapping; "
+                                "this is brittle across tokenization differences."
+                            ),
+                            "evidence": (
+                                f"key_map_usages={key_map_occurrence_count}, "
+                                f"max_key_map_entries={max_key_map_entries}"
+                            ),
+                        }
+                    )
+
+            if transform_matching_count >= 3 or (total_morph_count >= 5 and replacement_transform_count <= 1):
+                risks.append(
+                    {
+                        "code": "formula_complex_step_morph_risk",
+                        "message": (
+                            "Formula-only derivation uses complex step morphing. "
+                            "Prefer fewer morphs and safer staged reveals between steps."
+                        ),
+                        "evidence": (
+                            f"TransformMatchingTex={transform_matching_count}, "
+                            f"ReplacementTransform={replacement_transform_count}, Transform={transform_count}"
+                        ),
+                    }
+                )
 
         return risks
 
@@ -512,6 +927,9 @@ class LLMService:
     def _analyze_code_issues(self, code: str) -> str:
         """Analyze code to identify potential issues."""
         issues = []
+
+        for issue in self._analyze_static_code_correctness_issues(code):
+            issues.append(issue["message"])
         
         # Check for common deprecated methods
         deprecated_methods = [
@@ -535,33 +953,77 @@ class LLMService:
 
     def _create_error_correction_prompt(self, original_prompt: str, failed_code: str, error_msg: str) -> str:
         """Create a prompt for error correction."""
+        formula_only = self._is_formula_only_scene_request(original_prompt)
+        is_code_correctness_failure = self._is_code_correctness_error(error_msg)
+        extra_rules = ""
+        if formula_only and is_code_correctness_failure:
+            extra_rules = (
+                "Formula-only retry mode (strict): simplify aggressively. "
+                "Use 1 MathTex object per derivation step, max 4 steps total, "
+                "no decorative objects, and no chained helper abstractions. "
+                "Fallback pattern: staged reveals with Write/FadeIn; use ReplacementTransform only for obvious 1:1 swaps; "
+                "avoid TransformMatchingTex chains and key_map mapping.\n\n"
+            )
+
         return (
             f"The previous code generation failed. Please fix the issues and generate working Manim code.\n\n"
             f"Original request: {original_prompt}\n\n"
             f"Previous code:\n{failed_code}\n\n"
             f"Error/Issues: {error_msg}\n\n"
+            f"{extra_rules}"
             f"Please generate corrected Manim code that avoids these issues. "
             f"Use only modern Manim v0.19.0+ API methods. "
             f"Return ONLY the corrected Python code."
         )
 
-    def _create_video_error_correction_prompt(self, original_prompt: str, video_errors: str) -> str:
+    def _create_video_error_correction_prompt(self, original_prompt: str, video_errors: Any) -> str:
         """Create a prompt for video compilation error correction."""
+        if isinstance(video_errors, list):
+            error_history = [str(item).strip() for item in video_errors if str(item).strip()]
+        else:
+            text = str(video_errors).strip()
+            error_history = [text] if text else []
+
+        policy = build_retry_policy(
+            error_history,
+            formula_only=self._is_formula_only_scene_request(original_prompt),
+        )
+        policy_lines = "\n".join(format_retry_policy_lines(policy))
+        error_summary = "; ".join(error_history[-4:]) if error_history else "None"
+
         return (
-            f"The previous video generation attempts failed during compilation. Please generate simpler, more reliable Manim code.\n\n"
+            f"The previous generation attempt(s) failed. Generate corrected, more robust Manim code.\n\n"
             f"Original request: {original_prompt}\n\n"
-            f"Video compilation errors encountered: {video_errors}\n\n"
-            f"CRITICAL FIXES NEEDED:\n"
+            f"Recent failures: {error_summary}\n\n"
+            f"RETRY POLICY (must follow strictly):\n"
+            f"{policy_lines}\n\n"
+            f"CRITICAL COMPATIBILITY FIXES:\n"
             f"- Use ONLY 3D coordinates for all points: [x, y, 0] instead of [x, y]\n"
             f"- For Line objects, use: Line(start=[-3, 0, 0], end=[3, 0, 0])\n"
             f"- For positioning, use: object.move_to([x, y, 0])\n"
             f"- Avoid complex coordinate systems\n"
             f"- Use simple shapes and animations only\n"
             f"- Test all coordinates are 3D (x, y, z)\n\n"
-            f"Please generate SIMPLER, more reliable Manim code that will definitely compile. "
-            f"Focus on basic animations with proper 3D coordinates. "
+            f"Generate simpler, readable Manim code that compiles and follows the retry policy. "
             f"Return ONLY the corrected Python code."
         )
+
+    def _is_code_correctness_error(self, error_msg: str) -> bool:
+        """Classify whether retry failure text indicates syntax/code-correctness issues."""
+        normalized = error_msg.lower()
+        code_markers = (
+            "compilation error",
+            "converted code error",
+            "syntax error",
+            "missing generatedscene",
+            "missing construct",
+            "missing manim import",
+            "invalid scene structure",
+            "missing animation",
+            "keyword assignment",
+            "generatedscene class",
+        )
+        return any(marker in normalized for marker in code_markers)
 
     async def generate_manim_code_with_video_validation(self, prompt: str, model: Optional[str] = None, video_errors: list = None, auto_config = None) -> str:
         """Generate Manim code with video generation error feedback.
@@ -576,7 +1038,7 @@ class LLMService:
         else:
             # For non-auto models, incorporate video errors if available
             if video_errors:
-                enhanced_prompt = self._create_video_error_correction_prompt(prompt, "; ".join(video_errors[-3:]))
+                enhanced_prompt = self._create_video_error_correction_prompt(prompt, video_errors)
                 return await self.generate_manim_code(enhanced_prompt, model)
             else:
                 return await self.generate_manim_code(prompt, model)
@@ -626,7 +1088,7 @@ class LLMService:
         # Phase 5: Try Gemini Flash (1 attempt)
         logger.info("Phase 5: Trying Gemini Flash...")
         if video_errors:
-            enhanced_prompt = self._create_video_error_correction_prompt(original_prompt, "; ".join(video_errors[-3:]))
+            enhanced_prompt = self._create_video_error_correction_prompt(original_prompt, video_errors)
             result = await self._try_single_generation("gemini-2.5-flash", enhanced_prompt)
         else:
             result = await self._try_single_generation("gemini-2.5-flash", original_prompt)
@@ -639,7 +1101,7 @@ class LLMService:
         final_simplified = await self._simplify_prompt_with_model(original_prompt, "gemini-2.5-flash-lite")
         if final_simplified:
             if video_errors:
-                enhanced_prompt = self._create_video_error_correction_prompt(final_simplified, "; ".join(video_errors[-3:]))
+                enhanced_prompt = self._create_video_error_correction_prompt(final_simplified, video_errors)
                 result = await self._try_single_generation("gemini-2.5-flash", enhanced_prompt)
             else:
                 result = await self._try_single_generation("gemini-2.5-flash", final_simplified)
@@ -741,7 +1203,7 @@ class LLMService:
             final_simplified = await self._simplify_prompt_with_model(current_prompt, fallback_model)
             if final_simplified:
                 if enable_video_feedback and video_errors:
-                    enhanced_prompt = self._create_video_error_correction_prompt(final_simplified, "; ".join(video_errors[-3:]))
+                    enhanced_prompt = self._create_video_error_correction_prompt(final_simplified, video_errors)
                     result = await self._try_single_generation(fallback_model, enhanced_prompt)
                 else:
                     result = await self._try_single_generation(fallback_model, final_simplified)
