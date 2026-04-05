@@ -114,7 +114,7 @@ class LLMService:
             "Instead, use ONLY these methods for axis labels: "
             "- Use 'axes.get_x_axis_label(\"Time (s)\")' for x-axis labels "
             "- Use 'axes.get_y_axis_label(\"Position (m)\")' for y-axis labels "
-            "- Use 'Text()' for all other text, avoid 'MathTex()' if possible "
+            "- Use 'Text()' for prose labels and titles, and use 'MathTex()' for equations/formulas "
             "- Use 'Dot()' for points, 'Line()' for lines "
             "- Keep animations simple and educational "
             "- Avoid complex coordinate systems, use simple shapes and text "
@@ -132,7 +132,7 @@ class LLMService:
             "Instead, use ONLY these methods for axis labels: "
             "- Use 'axes.get_x_axis_label(\"Time (s)\")' for x-axis labels "
             "- Use 'axes.get_y_axis_label(\"Position (m)\")' for y-axis labels "
-            "- Use 'Text()' for all other text, avoid 'MathTex()' if possible "
+            "- Use 'Text()' for prose labels and titles, and use 'MathTex()' for equations/formulas "
             "- Use 'Dot()' for points, 'Line()' for lines "
             "- Keep animations simple and educational "
             "- Avoid complex coordinate systems, use simple shapes and text "
@@ -962,10 +962,10 @@ class LLMService:
         for issue in self._analyze_static_code_correctness_issues(code):
             issues.append(issue["message"])
         
-        # Check for common deprecated methods
+        # Check for common deprecated or invalid methods/patterns
         deprecated_methods = [
             "axes.add_labels()", "axes.add_coordinate_labels()", 
-            "axes.plot_line()", "ShowCreation", "TexMobject"
+            "axes.plot_line()", "ShowCreation", "TexMobject", "self.camera.config."
         ]
         
         for method in deprecated_methods:
@@ -979,6 +979,9 @@ class LLMService:
             issues.append(f"Syntax error: {e}")
         except Exception as e:
             issues.append(f"Code error: {e}")
+
+        if "self.camera.config." in code:
+            issues.append("Invalid Manim portrait config pattern: use module-level config.pixel_width/config.pixel_height/config.frame_width/config.frame_height, not self.camera.config")
         
         return "; ".join(issues) if issues else "Unknown issues detected"
 
@@ -1171,6 +1174,22 @@ class LLMService:
                 lines.append(
                     "Rewrite strategy: redistribute objects vertically to use portrait space more evenly."
                 )
+            if "graph_annotation_disconnected" in item:
+                lines.append(
+                    "Rewrite strategy: integrate graph annotation with the plotted content using a small nearby label or compact caption block, not a detached bottom text dump."
+                )
+            if "portrait_graph_undercomposed" in item:
+                lines.append(
+                    "Rewrite strategy: rebalance the portrait graph scene so the graph and annotation form one intentional composition with better vertical spacing."
+                )
+            if "projectile_marker_off_trajectory" in item:
+                lines.append(
+                    "Rewrite strategy: place the projectile marker by sampling the trajectory function, not by unrelated hard-coded coordinates."
+                )
+            if "velocity_vectors_detached" in item or "physics_vector_anchor_mismatch" in item:
+                lines.append(
+                    "Rewrite strategy: anchor all velocity vectors at the projectile marker and keep component arrows connected to the same motion point."
+                )
         return lines
 
     def _summarize_repair_memory(self, error_history: List[str], retry_state: Optional[RetryState] = None) -> str:
@@ -1247,6 +1266,22 @@ class LLMService:
                     risks.append("wide_horizontal_chain: too many RIGHT-based placements for a portrait derivation")
             if "aligned_edge=left" not in normalized and "aligned_edge=center" not in normalized and "arrange(down" in normalized:
                 risks.append("weak_equation_alignment: vertical derivation stack lacks explicit alignment")
+
+        if self._is_portrait_graph_scene_request(prompt):
+            if "formula = text(" in normalized or "annotation = text(" in normalized:
+                risks.append("graph_annotation_disconnected: graph annotation is a plain detached text block")
+            if re.search(r"move_to\(\[\s*0\s*,\s*-6(?:\.0)?\s*,\s*0\s*\]\)", normalized):
+                risks.append("portrait_graph_undercomposed: annotation or graph content is dumped too low in portrait frame")
+            if "axes.move_to([0, -1, 0])" in normalized and "y_length=12" in normalized:
+                risks.append("portrait_graph_undercomposed: graph occupies portrait frame awkwardly without integrated composition")
+
+        if "projectile motion" in prompt.lower() or "trajectory" in prompt.lower():
+            if "dot(" in normalized and "axes.c2p(5, 2.5)" in normalized and "trajectory = axes.plot" in normalized:
+                risks.append("projectile_marker_off_trajectory: projectile marker appears hard-coded instead of derived from the trajectory")
+            if "velocity_x = arrow(axes.c2p(5, 0)" in normalized:
+                risks.append("velocity_vectors_detached: horizontal velocity vector is detached from the projectile marker")
+            if "velocity_y = arrow(axes.c2p(5, 2.5)" in normalized and "velocity_x = arrow(axes.c2p(5, 0)" in normalized:
+                risks.append("physics_vector_anchor_mismatch: velocity components do not share a consistent anchor point")
 
         return risks
 

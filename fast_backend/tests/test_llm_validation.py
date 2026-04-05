@@ -1,6 +1,7 @@
 import asyncio
 
 from fast_backend.app.services.llm_service import LLMService
+from fast_backend.app.services.manim_code_converter import convert_manim_code
 from fast_backend.app.models.video import VideoGenerationCreate
 
 
@@ -397,3 +398,71 @@ class GeneratedScene(Scene):
     error_codes = {issue["code"] for issue in result["report"]["errors"]}
     assert "malformed_repeated_kwarg_assignment" in error_codes
     assert "syntax_error" in error_codes
+
+
+def test_analyze_code_issues_flags_invalid_camera_config_pattern():
+    llm_service = LLMService()
+    code = """
+from manim import *
+
+class GeneratedScene(Scene):
+    def construct(self):
+        self.camera.config.pixel_width = 1080
+        self.camera.config.pixel_height = 1920
+"""
+    issues = llm_service._analyze_code_issues(code)
+    assert "Invalid Manim portrait config pattern" in issues
+
+
+def test_convert_manim_code_preserves_mathtex_and_fixes_camera_config():
+    code = """
+from manim import *
+
+class GeneratedScene(Scene):
+    def construct(self):
+        self.camera.config.pixel_width = 1080
+        expr = MathTex(r"a+b")
+        self.add(expr)
+"""
+    converted = convert_manim_code(code)
+    assert "config.pixel_width = 1080" in converted
+    assert "self.camera.config.pixel_width" not in converted
+    assert "MathTex(" in converted
+    assert "Text(r\"a+b\")" not in converted
+
+
+def test_analyze_quality_risks_flags_graph_and_physics_semantic_issues():
+    llm_service = LLMService()
+
+    graph_code = """
+from manim import *
+class GeneratedScene(Scene):
+    def construct(self):
+        axes = Axes(x_length=8, y_length=12)
+        axes.move_to([0, -1, 0])
+        formula = Text("y = x^2")
+        formula.move_to([0, -6, 0])
+"""
+    graph_risks = llm_service.analyze_quality_risks(
+        prompt="Create a portrait educational scene with a quadratic graph, axis labels, and one short formula annotation below the graph. Keep spacing clear.",
+        code=graph_code,
+    )
+    assert any("graph_annotation_disconnected" in item for item in graph_risks)
+    assert any("portrait_graph_undercomposed" in item for item in graph_risks)
+
+    physics_code = """
+from manim import *
+class GeneratedScene(Scene):
+    def construct(self):
+        trajectory = axes.plot(lambda x: 0.5 * x - 0.05 * x**2, x_range=[0, 10], color=BLUE)
+        dot = Dot(axes.c2p(5, 2.5), color=RED)
+        velocity_x = Arrow(axes.c2p(5, 0), axes.c2p(5, 0) + RIGHT * 1, color=GREEN)
+        velocity_y = Arrow(axes.c2p(5, 2.5), axes.c2p(5, 2.5) + UP * 1, color=YELLOW)
+"""
+    physics_risks = llm_service.analyze_quality_risks(
+        prompt="Create a simple physics diagram of projectile motion with one trajectory, velocity arrows, and short labels only.",
+        code=physics_code,
+    )
+    assert any("projectile_marker_off_trajectory" in item for item in physics_risks)
+    assert any("velocity_vectors_detached" in item for item in physics_risks)
+    assert any("physics_vector_anchor_mismatch" in item for item in physics_risks)
