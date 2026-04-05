@@ -243,6 +243,36 @@ def test_create_structured_code_repair_prompt_mentions_modify_existing_code():
     assert "Missing construct method" in prompt
 
 
+def test_create_structured_code_repair_prompt_adds_layout_style_rules():
+    llm_service = LLMService()
+    prompt = llm_service._create_structured_code_repair_prompt(
+        original_prompt="Create a portrait formula-only derivation of (a+b)^2 with no graph.",
+        broken_code="from manim import *\n\nclass GeneratedScene(Scene):\n    def construct(self):\n        pass\n",
+        issue_text="portrait layout issue with horizontal alignment and decorative rectangle highlight",
+    )
+
+    assert "Additional layout/style repair requirements" in prompt
+    assert "avoid wide horizontal composition" in prompt
+    assert "Do not add decorative highlight rectangles" in prompt
+
+
+def test_summarize_layout_style_failures_includes_preview_and_alignment_guidance():
+    llm_service = LLMService()
+    summary = llm_service._summarize_layout_style_failures(
+        "Create a portrait formula-only derivation of (a+b)^2 with no graph.",
+        [
+            "preview_qa_failed attempt=1; preview_qa_codes=dense_horizontal_label_band; frames=dense_horizontal_label_band:2",
+            "bad alignment and decorative rectangle highlight",
+        ],
+    )
+
+    assert "Portrait requirement" in summary
+    assert "MathTex" in summary
+    assert "Reduce dense lower-band/horizontal clutter" in summary
+    assert "Fix alignment" in summary
+    assert "Remove decorative highlight shapes" in summary
+
+
 def test_validate_code_compilation_flags_formula_transform_matching_chain_risks():
     llm_service = LLMService()
     code = r"""

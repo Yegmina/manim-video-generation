@@ -4,7 +4,7 @@ import os
 import re
 
 from ..core.config import settings
-from .retry_policy import build_retry_policy, format_retry_policy_lines
+from .retry_policy import build_retry_policy, format_retry_policy_lines, extract_preview_issue_codes
 from .validation_report import ValidationReportBuilder
 
 logger = logging.getLogger(__name__)
@@ -512,6 +512,13 @@ class LLMService:
 
     def _create_structured_code_repair_prompt(self, *, original_prompt: str, broken_code: str, issue_text: str) -> str:
         """Create a targeted repair prompt that asks the model to modify existing code."""
+        extra_style_rules = ""
+        if self._is_layout_or_style_error(issue_text):
+            extra_style_rules = (
+                "Additional layout/style repair requirements:\n"
+                f"{self._summarize_layout_style_failures(original_prompt, [issue_text])}\n\n"
+            )
+
         return (
             "You previously generated Manim code that needs repair.\n\n"
             "Task: modify the existing code to fix the issues below while preserving the original educational intent.\n"
@@ -527,6 +534,7 @@ class LLMService:
             "- If layout/readability is part of the issue, simplify the layout instead of adding more objects.\n"
             "- For formula scenes, prefer MathTex, portrait-safe spacing, vertical stacking, and no decorative highlight shapes unless explicitly requested.\n"
             "- If an element causes errors or clutter, delete it rather than improvising something flashy.\n\n"
+            f"{extra_style_rules}"
             f"Code to repair:\n{broken_code}"
         )
 
@@ -990,6 +998,7 @@ class LLMService:
         )
         policy_lines = "\n".join(format_retry_policy_lines(policy))
         error_summary = "; ".join(error_history[-4:]) if error_history else "None"
+        style_guidance = self._summarize_layout_style_failures(original_prompt, error_history)
 
         return (
             f"The previous generation attempt(s) failed. Generate corrected, more robust Manim code.\n\n"
@@ -997,6 +1006,8 @@ class LLMService:
             f"Recent failures: {error_summary}\n\n"
             f"RETRY POLICY (must follow strictly):\n"
             f"{policy_lines}\n\n"
+            f"LAYOUT / STYLE REPAIR PRIORITIES:\n"
+            f"{style_guidance}\n\n"
             f"CRITICAL COMPATIBILITY FIXES:\n"
             f"- Use ONLY 3D coordinates for all points: [x, y, 0] instead of [x, y]\n"
             f"- For Line objects, use: Line(start=[-3, 0, 0], end=[3, 0, 0])\n"
@@ -1024,6 +1035,67 @@ class LLMService:
             "generatedscene class",
         )
         return any(marker in normalized for marker in code_markers)
+
+    def _is_layout_or_style_error(self, error_msg: str) -> bool:
+        """Classify whether retry failure text indicates layout/style correctness issues."""
+        normalized = error_msg.lower()
+        style_markers = (
+            "preview_qa_failed",
+            "border_crowding",
+            "top_bottom_empty_imbalance",
+            "dense_horizontal_label_band",
+            "layout",
+            "alignment",
+            "misaligned",
+            "portrait",
+            "orientation",
+            "horizontal",
+            "highlight",
+            "rectangle",
+            "box",
+            "decorative",
+            "clutter",
+            "crowding",
+        )
+        return any(marker in normalized for marker in style_markers)
+
+    def _summarize_layout_style_failures(self, original_prompt: str, video_errors: List[str]) -> str:
+        """Build deterministic layout/style repair guidance from retry history."""
+        issue_codes = extract_preview_issue_codes(video_errors)
+        lines: List[str] = []
+
+        if self._is_portrait_request(original_prompt):
+            lines.append("Portrait requirement: keep explicit 9:16 portrait config and avoid wide horizontal composition.")
+        if self._is_formula_only_scene_request(original_prompt):
+            lines.append("Formula requirement: use MathTex, vertically stacked derivation steps, and cleaner equation alignment.")
+            lines.append("Do not add decorative highlight rectangles, boxes, braces, or extra shapes unless explicitly requested.")
+
+        if "dense_horizontal_label_band" in issue_codes:
+            lines.append("Reduce dense lower-band/horizontal clutter; do not spread formula terms across the frame width.")
+        if "border_crowding" in issue_codes:
+            lines.append("Increase safe margins and keep all content away from frame edges.")
+        if "top_bottom_empty_imbalance" in issue_codes:
+            lines.append("Redistribute content vertically so the composition feels balanced in portrait framing.")
+
+        for raw in video_errors[-4:]:
+            lower = str(raw).lower()
+            if "alignment" in lower or "misaligned" in lower:
+                lines.append("Fix alignment: keep derivation steps in a consistent equation column with stable left/equals alignment.")
+            if "highlight" in lower or "rectangle" in lower or "box" in lower:
+                lines.append("Remove decorative highlight shapes and use simpler emphasis.")
+            if "horizontal" in lower or "orientation" in lower:
+                lines.append("Avoid horizontal layouts for portrait scenes; prefer vertical composition.")
+
+        if not lines:
+            lines.append("Simplify layout and remove nonessential decorative elements.")
+
+        deduped: List[str] = []
+        seen = set()
+        for line in lines:
+            if line not in seen:
+                seen.add(line)
+                deduped.append(line)
+        return "\n".join(f"- {line}" for line in deduped)
 
     async def generate_manim_code_with_video_validation(self, prompt: str, model: Optional[str] = None, video_errors: list = None, auto_config = None) -> str:
         """Generate Manim code with video generation error feedback.
