@@ -1077,7 +1077,7 @@ class LLMService:
         if "top_bottom_empty_imbalance" in issue_codes:
             lines.append("Redistribute content vertically so the composition feels balanced in portrait framing.")
 
-        for raw in video_errors[-4:]:
+        for raw in video_errors[-6:]:
             lower = str(raw).lower()
             if "alignment" in lower or "misaligned" in lower:
                 lines.append("Fix alignment: keep derivation steps in a consistent equation column with stable left/equals alignment.")
@@ -1085,6 +1085,8 @@ class LLMService:
                 lines.append("Remove decorative highlight shapes and use simpler emphasis.")
             if "horizontal" in lower or "orientation" in lower:
                 lines.append("Avoid horizontal layouts for portrait scenes; prefer vertical composition.")
+            if "mathtex" in lower and "text" in lower:
+                lines.append("Prefer MathTex for equations instead of Text.")
 
         if not lines:
             lines.append("Simplify layout and remove nonessential decorative elements.")
@@ -1096,6 +1098,40 @@ class LLMService:
                 seen.add(line)
                 deduped.append(line)
         return "\n".join(f"- {line}" for line in deduped)
+
+    def analyze_quality_risks(self, *, prompt: str, code: str) -> List[str]:
+        """Detect non-blocking but undesirable style/layout qualities that should trigger repair."""
+        risks: List[str] = []
+        normalized = code.lower()
+
+        if self._is_portrait_request(prompt):
+            portrait_config_present = all(
+                token in code
+                for token in (
+                    "config.pixel_width = 1080",
+                    "config.pixel_height = 1920",
+                    "config.frame_width = 9",
+                    "config.frame_height = 16",
+                )
+            )
+            if not portrait_config_present:
+                risks.append("portrait_orientation_missing: expected explicit 9:16 portrait config")
+
+        if self._is_formula_only_scene_request(prompt):
+            if "text(" in normalized and "mathtex(" not in normalized:
+                risks.append("formula_uses_text_not_mathtex: equations should use MathTex")
+            if re.search(r"\b(rectangle|surroundingrectangle)\s*\(", normalized):
+                risks.append("decorative_highlight_box: remove decorative rectangles/boxes in formula scenes")
+            if "arrange(right" in normalized:
+                risks.append("horizontal_formula_layout: avoid right-arranged horizontal formula composition in portrait scenes")
+            if ".next_to(" in normalized and "right" in normalized and self._is_portrait_request(prompt):
+                right_placements = len(re.findall(r"\.next_to\([^)]*,\s*RIGHT\b", code))
+                if right_placements >= 2:
+                    risks.append("wide_horizontal_chain: too many RIGHT-based placements for a portrait derivation")
+            if "aligned_edge=left" not in normalized and "aligned_edge=center" not in normalized and "arrange(down" in normalized:
+                risks.append("weak_equation_alignment: vertical derivation stack lacks explicit alignment")
+
+        return risks
 
     async def generate_manim_code_with_video_validation(self, prompt: str, model: Optional[str] = None, video_errors: list = None, auto_config = None) -> str:
         """Generate Manim code with video generation error feedback.

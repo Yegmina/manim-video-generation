@@ -273,6 +273,31 @@ def test_summarize_layout_style_failures_includes_preview_and_alignment_guidance
     assert "Remove decorative highlight shapes" in summary
 
 
+def test_analyze_quality_risks_flags_formula_style_problems_even_if_code_compiles():
+    llm_service = LLMService()
+    code = """
+from manim import *
+
+class GeneratedScene(Scene):
+    def construct(self):
+        step1 = Text("(a+b)^2")
+        step2 = Text("= a^2 + 2ab + b^2")
+        row = VGroup(step1, step2).arrange(RIGHT, buff=0.5)
+        box = SurroundingRectangle(row)
+        self.play(Write(row))
+        self.play(Create(box))
+"""
+    risks = llm_service.analyze_quality_risks(
+        prompt="Create a portrait formula-only derivation of (a+b)^2 with no graph for Shorts.",
+        code=code,
+    )
+
+    assert any("portrait_orientation_missing" in item for item in risks)
+    assert any("formula_uses_text_not_mathtex" in item for item in risks)
+    assert any("decorative_highlight_box" in item for item in risks)
+    assert any("horizontal_formula_layout" in item for item in risks)
+
+
 def test_validate_code_compilation_flags_formula_transform_matching_chain_risks():
     llm_service = LLMService()
     code = r"""

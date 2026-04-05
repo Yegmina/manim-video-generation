@@ -9,10 +9,30 @@ from ....api.deps import get_db, get_current_user_optional
 from ....services.video_service import VideoGenerationService
 from ....services.file_service import FileService
 from ....services.llm_service import LLMService
+from ....services.preview_qa_service import PreviewQAService
+from ....services.retry_policy import encode_preview_qa_error
 from ....models.video import VideoGenerationResponse, VideoQuality, VideoFormat
 from ....models.user import User
 
 router = APIRouter()
+
+
+def _preview_retry_error(preview_report: dict, attempt: int) -> str:
+    """Build parseable retry feedback from preview QA aggregate issue codes."""
+    summary = preview_report.get("summary", {})
+    aggregate_issues = summary.get("aggregate_issues", [])
+    issue_codes = [str(issue.get("code", "")).strip() for issue in aggregate_issues]
+    issue_codes = [code for code in issue_codes if code]
+    issue_frames = {
+        str(issue.get("code", "")): int(issue.get("frame_count", 0))
+        for issue in aggregate_issues
+        if issue.get("code")
+    }
+    return encode_preview_qa_error(
+        attempt=attempt,
+        issue_codes=issue_codes,
+        issue_frames=issue_frames,
+    )
 
 
 class AutoModeConfig(BaseModel):
@@ -23,7 +43,8 @@ class AutoModeConfig(BaseModel):
     enable_prompt_simplification: bool = Field(default=True, description="Enable prompt simplification phase")
     enable_gemini_fallback: bool = Field(default=True, description="Enable Gemini model fallback")
     enable_video_error_feedback: bool = Field(default=True, description="Enable video error feedback for retries")
-    preferred_models: List[str] = Field(default=["gemma-3-27b-it", "gemini-2.5-flash-lite", "gemini-2.5-flash"], 
+    enable_preview_qa: bool = Field(default=True, description="Render low-quality preview and run frame-level heuristic QA before final render")
+    preferred_models: List[str] = Field(default=["gemma-3-27b-it", "gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-2.5-flash"], 
                                        description="Preferred models in order of preference")
     custom_prompt_modifiers: List[str] = Field(default=[], description="Custom prompt modifiers to apply")
 
@@ -133,6 +154,11 @@ async def generate_video_auto_mode(
 
     video_errors = []
     max_total_attempts = auto_config.max_total_attempts
+    preview_qa_service = (
+        PreviewQAService(manim_generator=video_service.manim_generator)
+        if auto_config.enable_preview_qa
+        else None
+    )
 
     for overall_attempt in range(max_total_attempts):
         try:
@@ -165,6 +191,26 @@ async def generate_video_auto_mode(
                 continue
             # Use converted script for actual video generation
             code_to_use = converted_script
+
+            quality_risks = llm_service.analyze_quality_risks(prompt=prompt, code=code_to_use)
+            if quality_risks:
+                video_errors.extend(quality_risks)
+                continue
+
+            preview_report = None
+            if auto_config.enable_preview_qa and preview_qa_service is not None:
+                preview_report = preview_qa_service.run_preview_qa(
+                    script_content=code_to_use,
+                    scene_name="GeneratedScene",
+                )
+                if not preview_report.get("ok", False):
+                    video_errors.append(
+                        _preview_retry_error(
+                            preview_report=preview_report,
+                            attempt=overall_attempt + 1,
+                        )
+                    )
+                    continue
             
             # Create video generation request
             video_gen = await video_service.create_video_generation(
@@ -183,6 +229,7 @@ async def generate_video_auto_mode(
                     "auto_config": auto_config.dict(),
                     "validation_report": converted_validation.get("report"),
                     "source_validation_report": compilation_result.get("report"),
+                    "preview_qa_report": preview_report,
                 },
                 ip_address=request.client.host if request.client else None,
                 user_agent=request.headers.get("user-agent"),
