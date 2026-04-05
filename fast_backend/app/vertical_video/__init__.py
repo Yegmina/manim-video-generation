@@ -18,6 +18,7 @@ from .models import (
 from .deterministic_planner import DeterministicVerticalPlanner
 from .examples import VerticalExampleSpec, builtin_vertical_examples, get_example
 from .service import VerticalVideoService
+from .repair_loop import VerticalVideoRepairLoop
 
 __all__ = [
     "ContentFamily",

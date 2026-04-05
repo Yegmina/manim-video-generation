@@ -1,2 +1,5 @@
 {"timestamp": "2026-04-05T11:10:04Z", "event": "seeded", "message": "Initialized durable runner state for the vertical-video replacement effort."}
 {"timestamp": "2026-04-05T11:10:04Z", "event": "seeded", "message": "Captured existing subsystem docs and implementation files as starting artifacts."}
+{"timestamp": "2026-04-05T11:43:26Z", "event": "task_started", "message": "Implement manifest-backed semantic correctness and strengthen vertical templates for reviewable output", "task_id": "scene-manifest-emission", "title": "Emit machine-readable scene manifests from generated vertical scenes"}
+{"timestamp": "2026-04-05T15:28:33Z", "event": "note", "message": "Continuing physics repair-loop work: target dense_horizontal_label_band by compacting lower info region and rerunning until accepted artifact or next concrete blocker.", "current_task_id": "scene-manifest-emission"}
+{"timestamp": "2026-04-05T16:11:22Z", "event": "note", "message": "Continuing project work: focus on making physics repair loop converge by eliminating dense_horizontal_label_band through stronger layout/repair policy.", "current_task_id": "scene-manifest-emission"}

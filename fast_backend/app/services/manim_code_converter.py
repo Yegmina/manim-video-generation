@@ -34,8 +34,6 @@ class ManimCodeConverter:
             (r'inner_radius\s*=', r'radius='),
             (r'outer_radius\s*=', r'radius='),
             (r'Scene\.next_section\(', r'Scene.next_section(section_type='),
-            (r'VGroup\((.*?)\)', r'VGroup(*\1)'),
-            (r'SurroundingRectangle\((.*?),(.*?),(.*?)\)', r'SurroundingRectangle(\1, color=\2, buff=\3)'),
             (r'OpenGLMobject', r'Mobject'),
             (r'OpenGLSurface', r'Surface'),
             (r'Mobject\.add_updater\((.*?)\)', r'Mobject.add_dt_updater(\1)'),

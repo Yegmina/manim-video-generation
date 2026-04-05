@@ -14,11 +14,12 @@
     {
       "id": "scene-manifest-emission",
       "title": "Emit machine-readable scene manifests from generated vertical scenes",
-      "status": "todo",
+      "status": "in_progress",
       "priority": "high",
       "area": "validation",
       "depends_on": [],
-      "notes": "Needed so semantic validation runs against measured scene metadata instead of hand-authored contracts."
+      "notes": "Needed so semantic validation runs against measured scene metadata instead of hand-authored contracts.",
+      "started_at": "2026-04-05T11:43:26Z"
     },
     {
       "id": "semantic-benchmark-integration",

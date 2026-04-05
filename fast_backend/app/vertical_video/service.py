@@ -3,9 +3,12 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+import json
+import os
 
 from .deterministic_planner import DeterministicVerticalPlanner
 from .manim_builder import VerticalManimScriptBuilder
+from .manifest import build_scene_manifest
 from .models import VerticalVideoPlan, VerticalVideoRequest
 
 
@@ -26,6 +29,14 @@ class VerticalVideoService:
     def build_script_from_plan(self, plan: VerticalVideoPlan) -> str:
         return self.builder.build_script(plan)
 
+    def emit_manifest(self, plan: VerticalVideoPlan, output_path: str | Path | None = None) -> dict:
+        manifest = build_scene_manifest(plan)
+        if output_path is not None:
+            path = Path(output_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        return manifest
+
     def render_video(
         self,
         request: VerticalVideoRequest,
@@ -37,6 +48,7 @@ class VerticalVideoService:
         script = self.builder.build_script(plan)
 
         output_dir = Path(output_dir)
+        self.emit_manifest(plan, output_dir / f"{output_name}_manifest.json")
         scripts_dir = output_dir / "scripts"
         scripts_dir.mkdir(parents=True, exist_ok=True)
         script_path = scripts_dir / f"{output_name}.py"
@@ -45,8 +57,14 @@ class VerticalVideoService:
         media_dir = output_dir / "media"
         media_dir.mkdir(parents=True, exist_ok=True)
 
+        python_bin = os.environ.get("VERTICAL_VIDEO_PYTHON")
+        if not python_bin:
+            repo_root = Path(__file__).resolve().parents[3]
+            venv_python = repo_root / ".venv" / "bin" / "python"
+            python_bin = str(venv_python if venv_python.exists() else Path(sys.executable))
+
         command = [
-            sys.executable,
+            python_bin,
             "-m",
             "manim",
             "render",

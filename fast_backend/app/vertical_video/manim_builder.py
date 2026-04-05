@@ -48,6 +48,10 @@ class VerticalManimScriptBuilder:
 
 
             def make_footer(text):
+                if not text:
+                    footer = Dot(radius=0.001, fill_opacity=0.0, stroke_opacity=0.0)
+                    footer.move_to([0, -100, 0])
+                    return footer
                 footer = Text(text, font_size=24, color="#CBD5E1")
                 fit_to_portrait(footer, extra_margin=0.6)
                 footer.to_edge(DOWN, buff=SAFE_Y)
@@ -103,18 +107,31 @@ class VerticalManimScriptBuilder:
                 return axes, graph, markers, labels, note
 
 
-            def build_motion_scene_objects(payload):
+            def build_motion_scene_objects(payload, title):
                 x_range = payload["x_range"]
                 y_range = payload["y_range"]
+                equation = MathTex(payload["equation_text"], font_size=24, color=WHITE)
+                phase_text = Text(payload["phases"][1]["label"] if payload.get("phases") else "Motion state", font_size=16, color="#CBD5E1")
+                info = VGroup(equation, phase_text).arrange(DOWN, aligned_edge=LEFT, buff=0.04)
+                info.scale_to_fit_width(2.4)
+                info_box = RoundedRectangle(corner_radius=0.12, width=info.width + 0.22, height=info.height + 0.18, color="#334155")
+                info_box.set_fill("#0F172A", opacity=0.88)
+                info.move_to(info_box.get_center())
+                info_card = VGroup(info_box, info)
+
+                top_anchor_y = title.get_bottom()[1] - 0.14
+                graph_center_y = 0.15
+                graph_height = 4.55
+
                 axes = Axes(
                     x_range=[x_range[0], x_range[1], 1],
                     y_range=[y_range[0], y_range[1], 1],
-                    x_length=6.0,
-                    y_length=7.2,
+                    x_length=4.8,
+                    y_length=graph_height,
                     axis_config={"color": GREY_B, "include_numbers": False},
                     tips=False,
                 )
-                axes.shift(DOWN * 0.4)
+                axes.move_to([-0.25, graph_center_y, 0])
                 trajectory_expression = payload["trajectory_expression"]
                 graph = axes.plot(
                     lambda x: eval(trajectory_expression, {"__builtins__": {}}, {"x": x, "math": math}),
@@ -125,13 +142,19 @@ class VerticalManimScriptBuilder:
                 marker_x = payload["marker_x"]
                 marker_y = eval(trajectory_expression, {"__builtins__": {}}, {"x": marker_x, "math": math})
                 projectile = Dot(axes.c2p(marker_x, marker_y), color="#38BDF8", radius=0.11)
-                vx = Arrow(projectile.get_center(), projectile.get_center() + RIGHT * 1.1, buff=0.0, color="#22C55E", stroke_width=8)
-                vy = Arrow(projectile.get_center(), projectile.get_center() + UP * 0.9, buff=0.0, color="#A78BFA", stroke_width=8)
-                vx_label = Text("vx", font_size=24, color="#22C55E").next_to(vx, UP, buff=0.08)
-                vy_label = Text("vy", font_size=24, color="#A78BFA").next_to(vy, LEFT, buff=0.08)
-                equation = Text(payload["equation_text"], font_size=28, color=WHITE)
-                equation.next_to(axes, DOWN, buff=0.25)
-                return axes, graph, projectile, vx, vy, vx_label, vy_label, equation
+                vx = Arrow(projectile.get_center(), projectile.get_center() + RIGHT * 1.0, buff=0.0, color="#22C55E", stroke_width=8)
+                vy = Arrow(projectile.get_center(), projectile.get_center() + UP * 0.8, buff=0.0, color="#A78BFA", stroke_width=8)
+                vx_label = Text("v_x", font_size=20, color="#22C55E").next_to(vx, UP, buff=0.05)
+                vy_label = Text("v_y", font_size=20, color="#A78BFA").next_to(vy, LEFT, buff=0.05)
+                x_axis_label = Text(payload.get("x_axis_label", "horizontal distance"), font_size=18, color="#CBD5E1")
+                y_axis_label = Text(payload.get("y_axis_label", "height"), font_size=18, color="#CBD5E1")
+                x_axis_label.next_to(axes.x_axis, DOWN, buff=0.02)
+                y_axis_label.rotate(PI / 2)
+                y_axis_label.next_to(axes.y_axis, LEFT, buff=0.06)
+
+                info_card.next_to(title, DOWN, buff=0.18)
+                info_card.to_edge(RIGHT, buff=SAFE_X + 0.15)
+                return axes, graph, projectile, vx, vy, vx_label, vy_label, info_card, x_axis_label, y_axis_label
 
 
             class GeneratedScene(Scene):
@@ -161,17 +184,19 @@ class VerticalManimScriptBuilder:
                         self.play(LaggedStart(*[Write(label) for label in labels], lag_ratio=0.2), run_time=0.9)
                         self.play(FadeIn(note, shift=UP * 0.1), FadeIn(footer, shift=UP * 0.15), run_time=0.5)
                         self.wait(0.8)
-                        self.play(FadeOut(axes, graph, markers, labels, note, footer, title), run_time=0.8)
+                        fade_targets = [axes, graph, markers, labels, note, footer, title]
+                        self.play(*[FadeOut(mob) for mob in fade_targets], run_time=0.8)
                         return
 
-                    axes, graph, projectile, vx, vy, vx_label, vy_label, equation = build_motion_scene_objects(SCENE_PAYLOAD)
-                    self.play(Create(axes), run_time=0.7)
+                    axes, graph, projectile, vx, vy, vx_label, vy_label, info, x_axis_label, y_axis_label = build_motion_scene_objects(SCENE_PAYLOAD, title)
+                    self.play(Create(axes), FadeIn(x_axis_label), FadeIn(y_axis_label), run_time=0.7)
                     self.play(Create(graph), run_time=1.0)
                     self.play(FadeIn(projectile, scale=0.7), run_time=0.3)
                     self.play(GrowArrow(vx), GrowArrow(vy), FadeIn(vx_label), FadeIn(vy_label), run_time=0.7)
-                    self.play(Write(equation), FadeIn(footer, shift=UP * 0.15), run_time=0.6)
+                    self.play(Write(info), FadeIn(footer, shift=UP * 0.15), run_time=0.6)
                     self.wait(0.8)
-                    self.play(FadeOut(axes, graph, projectile, vx, vy, vx_label, vy_label, equation, footer, title), run_time=0.8)
+                    fade_targets = [axes, graph, projectile, vx, vy, vx_label, vy_label, info, x_axis_label, y_axis_label, footer, title]
+                    self.play(*[FadeOut(mob) for mob in fade_targets], run_time=0.8)
             """
         )
 

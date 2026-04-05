@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from app.services.semantic_validation import (
+from ..services.semantic_validation import (
     FormulaSemanticContract,
     GraphSemanticContract,
     PhysicsSemanticContract,
@@ -67,8 +67,8 @@ class DeterministicVerticalPlanner:
 
     def _build_final_cta(self, request: VerticalVideoRequest) -> str:
         if request.family.value == "math":
-            return "Pause here and try the next step yourself."
-        return "Pause here and predict the next state before replaying."
+            return ""
+        return ""
 
     def _build_beats(self, request: VerticalVideoRequest, template_id: str) -> List[VisualBeat]:
         if template_id == "math_derivation_stack":
@@ -167,6 +167,8 @@ class DeterministicVerticalPlanner:
                 "y_range": list(kinematics.y_range),
                 "marker_x": kinematics.marker_x,
                 "phases": [phase.__dict__ for phase in kinematics.phases],
+                "x_axis_label": "horizontal distance",
+                "y_axis_label": "height",
                 "cta": self._build_final_cta(request),
             },
         )
