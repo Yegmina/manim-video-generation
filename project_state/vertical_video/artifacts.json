@@ -1,0 +1,59 @@
+{
+  "updated_at": "2026-04-05T11:10:04Z",
+  "artifacts": [
+    {
+      "id": "artifact-001",
+      "path": "docs/vertical-video-system.md",
+      "kind": "design-doc",
+      "description": "Kickoff architecture for the deterministic vertical-video subsystem.",
+      "source_task_id": null,
+      "recorded_at": "2026-04-05T11:10:04Z",
+      "exists": true
+    },
+    {
+      "id": "artifact-002",
+      "path": "VALIDATION_KICKOFF.md",
+      "kind": "design-doc",
+      "description": "Semantic-validation direction and gap analysis for the replacement system.",
+      "source_task_id": null,
+      "recorded_at": "2026-04-05T11:10:04Z",
+      "exists": true
+    },
+    {
+      "id": "artifact-003",
+      "path": "fast_backend/app/vertical_video",
+      "kind": "code-dir",
+      "description": "Current deterministic planner/service/models/builder scaffold for vertical videos.",
+      "source_task_id": null,
+      "recorded_at": "2026-04-05T11:10:04Z",
+      "exists": true
+    },
+    {
+      "id": "artifact-004",
+      "path": "fast_backend/tests/test_vertical_video_examples.py",
+      "kind": "test",
+      "description": "Current projectile example coverage for the vertical-video subsystem.",
+      "source_task_id": null,
+      "recorded_at": "2026-04-05T11:10:04Z",
+      "exists": true
+    },
+    {
+      "id": "artifact-005",
+      "path": "vertical_project_runner.py",
+      "kind": "tool",
+      "description": "CLI + library entrypoint for durable continuation/resume state handling.",
+      "source_task_id": "runner-bootstrap",
+      "recorded_at": "2026-04-05T11:10:04Z",
+      "exists": true
+    },
+    {
+      "id": "artifact-006",
+      "path": "docs/long-horizon-runner.md",
+      "kind": "doc",
+      "description": "Operator notes for resuming and updating the vertical-video project state.",
+      "source_task_id": "runner-bootstrap",
+      "recorded_at": "2026-04-05T11:10:04Z",
+      "exists": true
+    }
+  ]
+}

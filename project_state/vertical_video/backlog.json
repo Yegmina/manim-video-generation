@@ -1,0 +1,62 @@
+{
+  "updated_at": "2026-04-05T11:10:04Z",
+  "tasks": [
+    {
+      "id": "runner-bootstrap",
+      "title": "Add durable runner/state scaffolding for the vertical-video project",
+      "status": "done",
+      "priority": "high",
+      "area": "workflow",
+      "depends_on": [],
+      "notes": "Adds resumable status/backlog/worklog/artifact tracking inside the repo.",
+      "completed_at": "2026-04-05T11:10:04Z"
+    },
+    {
+      "id": "scene-manifest-emission",
+      "title": "Emit machine-readable scene manifests from generated vertical scenes",
+      "status": "todo",
+      "priority": "high",
+      "area": "validation",
+      "depends_on": [],
+      "notes": "Needed so semantic validation runs against measured scene metadata instead of hand-authored contracts."
+    },
+    {
+      "id": "semantic-benchmark-integration",
+      "title": "Run semantic validation inside the robustness benchmark flow",
+      "status": "todo",
+      "priority": "high",
+      "area": "validation",
+      "depends_on": [
+        "scene-manifest-emission"
+      ],
+      "notes": "Connect manifest-aware checks into benchmark scoring and reports."
+    },
+    {
+      "id": "plan-preview-api",
+      "title": "Expose a plan-preview API for the vertical-video subsystem",
+      "status": "todo",
+      "priority": "medium",
+      "area": "api",
+      "depends_on": [],
+      "notes": "Useful before full render job wiring; should preview structured plans and emitted scripts."
+    },
+    {
+      "id": "math-template-happy-path",
+      "title": "Implement a strong math derivation happy-path example with tests",
+      "status": "todo",
+      "priority": "high",
+      "area": "templates",
+      "depends_on": [],
+      "notes": "The kickoff doc explicitly called out math_derivation_stack as a next milestone."
+    },
+    {
+      "id": "physics-regression-fixtures",
+      "title": "Expand physics examples and add render/QA regression fixtures",
+      "status": "todo",
+      "priority": "medium",
+      "area": "templates",
+      "depends_on": [],
+      "notes": "Build on the projectile example and keep portrait quality stable over time."
+    }
+  ]
+}

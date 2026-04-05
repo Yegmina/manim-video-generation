@@ -1,0 +1,13 @@
+{
+  "project_name": "StudyShorts-style vertical video replacement",
+  "project_slug": "vertical-video-replacement",
+  "mission": "Build a deterministic, testable, portrait-first video generation subsystem that can replace brittle prompt-only generation for short math and physics explainers.",
+  "phase": "scaffolded-subsystem-with-durable-runner",
+  "focus": "Resume from durable state, then push scene-manifest + semantic-validation integration.",
+  "current_task_id": null,
+  "current_task_title": null,
+  "latest_note": "Durable long-horizon runner initialized.",
+  "updated_at": "2026-04-05T11:10:04Z",
+  "last_resumed_at": "2026-04-05T11:10:04Z",
+  "state_version": 1
+}
